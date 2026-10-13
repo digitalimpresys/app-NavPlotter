@@ -1,0 +1,28 @@
+{
+  "name": "navplotter-app",
+  "version": "1.0.0",
+  "description": "App NavPlotter: la web app dei nodi dentro Capacitor, con allarme a schermo spento",
+  "scripts": {
+    "sync-web": "node scripts/sync-web.mjs",
+    "sync": "npx cap sync android",
+    "build:android": "npx cap sync android && cd android && ./gradlew assembleDebug"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/digitalimpresys/app-navplotter.git"
+  },
+  "author": "",
+  "license": "UNLICENSED",
+  "bugs": {
+    "url": "https://github.com/digitalimpresys/app-navplotter/issues"
+  },
+  "homepage": "https://github.com/digitalimpresys/app-navplotter#readme",
+  "dependencies": {
+    "@capacitor/android": "^7.6.9",
+    "@capacitor/core": "^7.6.9"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^7.6.9"
+  },
+  "private": true
+}

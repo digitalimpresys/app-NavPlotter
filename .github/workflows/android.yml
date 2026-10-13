@@ -1,0 +1,46 @@
+name: Android APK
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - run: npm ci
+      - run: npx cap sync android
+      - name: Build debug APK
+        working-directory: android
+        run: ./gradlew assembleDebug --no-daemon
+      - name: Name the APK after the branch
+        run: |
+          BR="${GITHUB_REF_NAME//\//-}"
+          echo "BR=$BR" >> "$GITHUB_ENV"
+          cp android/app/build/outputs/apk/debug/app-debug.apk "navplotter-$BR-debug.apk"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: navplotter-${{ env.BR }}-debug
+          path: navplotter-${{ env.BR }}-debug.apk
+      # A prerelease per branch, replaced at every build: the APK can be downloaded straight from the phone
+      - name: Publish as prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="apk-$BR"
+          gh release delete "$TAG" --cleanup-tag -y || true
+          gh release create "$TAG" "navplotter-$BR-debug.apk" --prerelease --target "$GITHUB_SHA" \
+            --title "APK di prova ($GITHUB_REF_NAME)" \
+            --notes "APK di debug costruito da ${GITHUB_SHA::7} sul ramo $GITHUB_REF_NAME."

@@ -2,3 +2,34 @@
 
 App per Android (poi macOS e forse iPhone) per i nodi NavPlotter: la stessa web app servita dai nodi,
 impacchettata con Capacitor, che si collega al nodo via WiFi e funziona senza internet.
+
+## Come funziona
+
+- `www/index.html` è la web app del firmware (`web/index.html` di Navplotter-tdeck-plus), copiata con
+  `npm run sync-web` (dal file su GitHub, oppure `npm run sync-web -- percorso/index.html`).
+- `www/navplotter-bridge.js` viene caricato prima della web app e:
+  - manda le richieste `/api/...` e le carte `/tiles/...` al nodo (di solito `http://192.168.4.1`),
+    attraverso l'HTTP nativo di Capacitor, così il nodo non deve cambiare nulla;
+  - aggiunge in Setup una scheda "App" con l'indirizzo del nodo e i comandi della guardia;
+  - avvia il servizio di guardia nativo.
+- `NodeWatchService` (Android) è un servizio in primo piano che chiede `/api/state` ogni 2 secondi
+  anche a schermo spento:
+  - se un bersaglio è in allarme suona la suoneria di sveglia del telefono in loop (canale "allarme",
+    suona anche col telefono in silenzioso), vibra e mostra una notifica con "Silenzia";
+  - per ogni nuovo messaggio non letto mostra una notifica;
+  - se il nodo non risponde per 30 secondi avvisa che l'allarme non può arrivare;
+  - lega l'app alla WiFi del nodo quando questa non ha internet, altrimenti Android userebbe i dati mobili.
+
+## APK di prova
+
+Ogni push costruisce un APK di debug con GitHub Actions e lo pubblica come pre-release
+`apk-<ramo>` nella pagina Releases del repository: si scarica direttamente dal telefono.
+
+## Build in locale
+
+Servono Node 22, JDK 21 e Android SDK (API 35).
+
+```
+npm ci
+npm run build:android    # APK in android/app/build/outputs/apk/debug/
+```
