@@ -35,6 +35,53 @@
   const target = () => nodeIp || base;
   const isLocal = () => /^https?:\/\/[^/:]+\.local(:|\/|$)/.test(base);
 
+  // ---------- pairing: the app follows one node by its id, whatever its name or address ----------
+  // The first node the app talks to is paired. When it stops answering, or another node answers at the same
+  // address, the app looks for the paired one: on its own WiFi (192.168.4.1), at its last address on the boat
+  // WiFi, and among the nodes announced on the network (mDNS, by id).
+  const store = (k, v) => { try { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch (e) {} };
+  const load = (k) => { try { return localStorage.getItem(k); } catch (e) { return null; } };
+  let paired = { id: load('np-pair-id'), name: load('np-pair-name') };
+  let otherNode = null, lastSearch = 0, searching = false;
+
+  function pair(id, name) {
+    paired = { id, name };
+    store('np-pair-id', id); store('np-pair-name', name);
+    otherNode = null;
+    renderAppCard();
+  }
+  function useNode(url) {
+    if (url === base) return;
+    base = url; nodeIp = null; failures = 0;
+    store('np-node', url);
+    startWatch();
+    renderAppCard();
+  }
+  const http = (url, ms) => plugin('CapacitorHttp', 'request', { url, method: 'GET', responseType: 'json', connectTimeout: ms, readTimeout: ms })
+    .then((r) => { let d = r.data; if (typeof d === 'string') d = JSON.parse(d); return d; });
+  const idAt = (url) => http(url + '/api/config', 2500).then((c) => (c && c.id) || null, () => null);
+
+  function findPaired(manual) {
+    if (!paired.id || searching || (!manual && Date.now() - lastSearch < 20000)) return Promise.resolve(false);
+    searching = true; lastSearch = Date.now(); renderAppCard();
+    const tried = new Set();
+    const check = (url) => {
+      if (!url || tried.has(url)) return Promise.resolve(false);
+      tried.add(url);
+      return idAt(url).then((id) => { if (id !== paired.id) return false; useNode(url); return true; });
+    };
+    const lastSta = load('np-pair-sta');
+    return check(base)
+      .then((ok) => ok || check(DEFAULT_NODE))
+      .then((ok) => ok || check(lastSta))
+      .then((ok) => ok || plugin('NodeWatch', 'discover', { timeout: 3000 }).then((r) => {
+        const nodes = (r && r.nodes) || [];
+        const hit = nodes.find((n) => n.id === paired.id) || null;
+        return hit ? check('http://' + hit.host + (hit.port && hit.port !== 80 ? ':' + hit.port : '')) : false;
+      }, () => false))
+      .then((ok) => { searching = false; renderAppCard(); return ok; });
+  }
+
   // ---------- fetch to the node through native HTTP ----------
   const webFetch = window.fetch.bind(window);
   window.fetch = function (resource, options) {
@@ -62,11 +109,22 @@
         if (typeof o === 'string') try { o = JSON.parse(o); } catch (e) { o = null; }
         failures = 0;
         nodeIp = o && isLocal() && o.sta && o.staIp ? 'http://' + o.staIp : null;
+        if (o && o.sta && o.staIp && !otherNode) store('np-pair-sta', 'http://' + o.staIp);
+      }
+      if (url === '/api/config' && r.status === 200) {
+        let o = d;
+        if (typeof o === 'string') try { o = JSON.parse(o); } catch (e) { o = null; }
+        if (o && o.id) {
+          if (!paired.id) pair(o.id, o.name || '');
+          else if (o.id === paired.id) { otherNode = null; if (o.name && o.name !== paired.name) pair(o.id, o.name); }
+          else { otherNode = { id: o.id, name: o.name || '' }; findPaired(false); }
+          renderAppCard();
+        }
       }
       if (d != null && typeof d !== 'string') d = JSON.stringify(d);
       return new Response(r.status === 204 ? null : d, { status: r.status, headers: r.headers });
     }, (e) => {
-      if (url === '/api/state' && ++failures >= 3) nodeIp = null; // the address may have changed
+      if (url === '/api/state' && ++failures >= 3) { nodeIp = null; findPaired(false); } // the address may have changed
       throw e;
     });
     const signal = options.signal;
@@ -132,29 +190,63 @@
     plugin('NodeWatch', 'shareFromNode', { url: target() + a.getAttribute('href') }).catch(() => {});
   }, true);
 
-  // ---------- "App" card at the end of Setup: node address and service state ----------
+  // ---------- "App" card at the end of Setup: paired node, address, watch ----------
+  const it = () => (window.lang || document.documentElement.lang || navigator.language || '').startsWith('it');
+  const T = (i, e) => (it() ? i : e);
+  const escH = (x) => String(x == null ? '' : x).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   function addSetupCard() {
     const wrap = document.querySelector('#pSetup .wrap');
     if (!wrap || document.getElementById('appCard')) return;
-    const it = (document.documentElement.lang || '').startsWith('it') || (navigator.language || '').startsWith('it');
     const card = document.createElement('div');
     card.className = 'card'; card.id = 'appCard';
-    card.innerHTML = '<div class="title">' + (it ? 'App' : 'App') + '</div>' +
-      '<label>' + (it ? 'Indirizzo del nodo' : 'Node address') + '</label>' +
-      '<input type="text" id="appNode" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">' +
-      '<div class="hint">' + (it ? 'Di solito http://192.168.4.1 (WiFi del nodo). Con il nodo sulla WiFi di bordo, l\'indirizzo che mostra il nodo.'
-        : 'Usually http://192.168.4.1 (the node\'s WiFi). With the node on the boat WiFi, the address the node shows.') + '</div>' +
-      '<div class="btns"><button class="btn" id="appNodeSave">' + (it ? 'Salva' : 'Save') + '</button>' +
-      '<button class="btn sec" id="appBattery">' + (it ? 'Non ottimizzare la batteria' : 'Ignore battery optimisation') + '</button>' +
-      '<button class="btn sec" id="appStop">' + (it ? 'Ferma la guardia' : 'Stop watching') + '</button></div>' +
-      '<div class="hint">' + (it ? 'La guardia resta attiva a schermo spento e suona l\'allarme di abbordo e i messaggi. Si ferma dalla notifica o da qui.'
-        : 'The watch keeps running with the screen off and sounds the collision alarm and messages. Stop it from the notification or here.') + '</div>';
     wrap.appendChild(card);
+    renderAppCard();
+  }
+  function renderAppCard() {
+    const card = document.getElementById('appCard');
+    if (!card) return;
+    const editing = document.activeElement && document.activeElement.id === 'appNode';
+    if (editing) return;
+    const node = paired.id ? '<b>' + escH(paired.name || '?') + '</b> <span class="tag">ID ' + escH(paired.id) + '</span>' : T('nessuno', 'none');
+    card.innerHTML = '<div class="title">App</div>' +
+      '<div class="kv" style="margin-top:8px"><span>' + T('Nodo abbinato', 'Paired node') + '</span><span>' + node + '</span>' +
+      '<span>' + T('Indirizzo', 'Address') + '</span><span>' + escH(target()) + (searching ? ' · ' + T('cerco...', 'searching...') : '') + '</span></div>' +
+      (otherNode ? '<div class="hint" style="color:var(--red)">' + T('A questo indirizzo risponde ', 'This address answers as ') + '<b>' + escH(otherNode.name) + '</b> (ID ' + escH(otherNode.id) + T('), non il nodo abbinato.', '), not the paired node.') + '</div>' : '') +
+      '<div class="btns"><button class="btn" id="appFind">' + T('Cerca il nodo abbinato', 'Find the paired node') + '</button>' +
+      (otherNode ? '<button class="btn sec" id="appPairOther">' + T('Abbina ', 'Pair ') + escH(otherNode.name) + '</button>' : '') + '</div>' +
+      '<div class="hint">' + T("L'app segue il nodo abbinato col suo ID, anche se cambia nome o passa dalla sua WiFi a quella di bordo. Per abbinarne un altro collegati alla sua WiFi NavPlotter-… e tocca Abbina.",
+        'The app follows the paired node by its ID, even when its name changes or it moves from its own WiFi to the boat WiFi. To pair another one, join its NavPlotter-… WiFi and tap Pair.') + '</div>' +
+      '<details style="margin-top:10px"><summary class="hint">' + T('Indirizzo a mano', 'Address by hand') + '</summary>' +
+      '<input type="text" id="appNode" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" style="margin-top:8px">' +
+      '<div class="btns"><button class="btn sec" id="appNodeSave">' + T('Usa questo indirizzo', 'Use this address') + '</button></div></details>' +
+      '<div class="btns"><button class="btn sec" id="appBattery">' + T('Non ottimizzare la batteria', 'Ignore battery optimisation') + '</button>' +
+      '<button class="btn sec" id="appStop">' + T('Ferma la guardia', 'Stop watching') + '</button></div>' +
+      '<div class="hint">' + T("La guardia resta attiva a schermo spento e suona l'allarme di abbordo e i messaggi. Si ferma dalla notifica o da qui.",
+        'The watch keeps running with the screen off and sounds the collision alarm and messages. Stop it from the notification or here.') + '</div>';
     document.getElementById('appNode').value = base;
+    document.getElementById('appFind').onclick = () => findPaired(true).then((ok) => { if (!ok) alert(T('Nodo abbinato non trovato. Il telefono è sulla sua WiFi o su quella di bordo?', 'Paired node not found. Is the phone on its WiFi or on the boat WiFi?')); });
+    const po = document.getElementById('appPairOther');
+    if (po) po.onclick = () => { pair(otherNode.id, otherNode.name); location.reload(); };
     document.getElementById('appNodeSave').onclick = () => { window.NavPlotterApp.setNode(document.getElementById('appNode').value); location.reload(); };
     document.getElementById('appBattery').onclick = () => plugin('NodeWatch', 'ignoreBatteryOptimizations', {}).catch(() => {});
     document.getElementById('appStop').onclick = () => { watching = false; plugin('NodeWatch', 'stop', {}).catch(() => {}); };
   }
+
+  // ---------- boat WiFi: what was typed once is offered to the next node ----------
+  // Android does not let an app read the password of a saved WiFi, so it is typed once; the app remembers it
+  // (on this phone only) and fills it in when another node is set up for the same boat.
+  document.addEventListener('click', (ev) => {
+    if (!ev.target || ev.target.id !== 'save') return;
+    const ss = document.getElementById('fStaSsid'), pw = document.getElementById('fStaPass'), net = document.getElementById('fNet');
+    if (net && net.value === '2' && ss && ss.value) { store('np-boat-ssid', ss.value); if (pw && pw.value) store('np-boat-pass', pw.value); }
+  }, true);
+  document.addEventListener('change', (ev) => {
+    if (!ev.target || ev.target.id !== 'fNet' || ev.target.value !== '2') return;
+    const ss = document.getElementById('fStaSsid'), pw = document.getElementById('fStaPass');
+    const s1 = load('np-boat-ssid'), p1 = load('np-boat-pass');
+    if (ss && !ss.value && s1) ss.value = s1;
+    if (pw && !pw.value && p1 && ss && ss.value === s1) pw.value = p1;
+  });
 
   document.addEventListener('DOMContentLoaded', () => { addSetupCard(); startWatch(); });
 })();

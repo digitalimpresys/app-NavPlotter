@@ -5,11 +5,17 @@ import android.annotation.SuppressLint;
 import android.content.Context;
 import android.content.Intent;
 import android.net.Uri;
+import android.net.nsd.NsdManager;
+import android.net.nsd.NsdServiceInfo;
+import android.os.Handler;
+import android.os.Looper;
 import android.os.Build;
 import android.os.PowerManager;
 import android.provider.Settings;
 import androidx.core.content.ContextCompat;
 import androidx.core.content.FileProvider;
+import com.getcapacitor.JSArray;
+import com.getcapacitor.JSObject;
 import com.getcapacitor.PermissionState;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
@@ -23,6 +29,10 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
 
 /** Bridge from the web app to the watch service (see navplotter-bridge.js). */
 @CapacitorPlugin(name = "NodeWatch", permissions = { @Permission(strings = { Manifest.permission.POST_NOTIFICATIONS }, alias = "notifications") })
@@ -110,6 +120,62 @@ public class NodeWatchPlugin extends Plugin {
                 call.resolve();
             } catch (Exception e) {
                 call.reject(e.toString());
+            }
+        });
+    }
+
+    /** The NavPlotter nodes announced on the current network (mDNS _navplotter._tcp), with their id. */
+    @PluginMethod
+    public void discover(PluginCall call) {
+        NsdManager nsd = (NsdManager) getContext().getSystemService(Context.NSD_SERVICE);
+        List<NsdServiceInfo> found = new ArrayList<>();
+        NsdManager.DiscoveryListener listener = new NsdManager.DiscoveryListener() {
+            @Override public void onDiscoveryStarted(String type) {}
+            @Override public void onDiscoveryStopped(String type) {}
+            @Override public void onServiceLost(NsdServiceInfo info) {}
+            @Override public void onStartDiscoveryFailed(String type, int error) {}
+            @Override public void onStopDiscoveryFailed(String type, int error) {}
+            @Override public void onServiceFound(NsdServiceInfo info) { synchronized (found) { found.add(info); } }
+        };
+        try {
+            nsd.discoverServices("_navplotter._tcp", NsdManager.PROTOCOL_DNS_SD, listener);
+        } catch (Exception e) {
+            call.reject(e.toString());
+            return;
+        }
+        new Handler(Looper.getMainLooper()).postDelayed(() -> {
+            try { nsd.stopServiceDiscovery(listener); } catch (Exception ignored) {}
+            List<NsdServiceInfo> list;
+            synchronized (found) { list = new ArrayList<>(found); }
+            resolveNext(nsd, list, 0, new JSArray(), call);
+        }, Math.max(1000, call.getInt("timeout", 3000)));
+    }
+
+    // Services are resolved one at a time (older Android versions refuse parallel resolves)
+    @SuppressWarnings("deprecation")
+    private void resolveNext(NsdManager nsd, List<NsdServiceInfo> list, int i, JSArray out, PluginCall call) {
+        if (i >= list.size()) {
+            JSObject r = new JSObject();
+            r.put("nodes", out);
+            call.resolve(r);
+            return;
+        }
+        nsd.resolveService(list.get(i), new NsdManager.ResolveListener() {
+            @Override
+            public void onResolveFailed(NsdServiceInfo info, int error) {
+                resolveNext(nsd, list, i + 1, out, call);
+            }
+
+            @Override
+            public void onServiceResolved(NsdServiceInfo info) {
+                JSObject o = new JSObject();
+                if (info.getHost() != null) o.put("host", info.getHost().getHostAddress());
+                o.put("port", info.getPort());
+                Map<String, byte[]> attrs = info.getAttributes();
+                if (attrs.get("id") != null) o.put("id", new String(attrs.get("id"), StandardCharsets.UTF_8));
+                if (attrs.get("name") != null) o.put("name", new String(attrs.get("name"), StandardCharsets.UTF_8));
+                out.put(o);
+                resolveNext(nsd, list, i + 1, out, call);
             }
         });
     }
