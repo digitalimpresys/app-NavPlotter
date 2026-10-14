@@ -67,10 +67,10 @@ public class NodeWatchPlugin extends Plugin {
         call.resolve();
     }
 
-    /** The silence button on the page's alarm banner: same toggle as the page. */
+    /** The silence button on the page's alarm banner: on=true silences the boats now in alarm, on=false lets them sound. */
     @PluginMethod
     public void mute(PluginCall call) {
-        if (NodeWatchService.running) send(NodeWatchService.ACTION_MUTE_TOGGLE);
+        if (NodeWatchService.running) send(call.getBoolean("on", true) ? NodeWatchService.ACTION_MUTE : NodeWatchService.ACTION_UNMUTE);
         call.resolve();
     }
 

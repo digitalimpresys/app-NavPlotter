@@ -33,9 +33,11 @@ import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -49,7 +51,8 @@ public class NodeWatchService extends Service {
 
     static final String TAG = "NodeWatch";
     static final String DEFAULT_URL = "http://192.168.4.1";
-    static final String ACTION_START = "start", ACTION_STOP = "stop", ACTION_MUTE = "mute", ACTION_MUTE_TOGGLE = "muteToggle";
+    static final String ACTION_START = "start", ACTION_STOP = "stop", ACTION_MUTE = "mute", ACTION_UNMUTE = "unmute";
+    static final long MUTE_MS = 600000; // a silenced boat keeps quiet for ten minutes, also if it leaves and re-enters the alarm
     static final String EXTRA_URL = "url", EXTRA_ALARM = "alarm";
     static final String CH_WATCH = "watch", CH_ALARM = "alarm2", CH_MSG = "messages", CH_LINK = "link";
     static final int ID_WATCH = 1, ID_ALARM = 2, ID_LINK = 3, ID_MSG = 10;
@@ -75,7 +78,8 @@ public class NodeWatchService extends Service {
     private Vibrator vibrator;
 
     // State, only touched on the handler thread
-    private final Set<String> alarmIds = new HashSet<>(), mutedIds = new HashSet<>();
+    private final Set<String> alarmIds = new HashSet<>();
+    private final Map<String, Long> mutedUntil = new HashMap<>();
     private final Set<String> seenMsgs = new HashSet<>();
     private boolean soundOn = true, online = false, linkLostShown = false, firstMsgs = true;
     private long lastOk = 0, msgStamp = -1;
@@ -113,13 +117,14 @@ public class NodeWatchService extends Service {
         }
         switch (action) {
             case ACTION_MUTE:
-                handler.post(() -> { mutedIds.addAll(alarmIds); updateAlarm(null, 0); });
-                return START_STICKY;
-            case ACTION_MUTE_TOGGLE:
                 handler.post(() -> {
-                    if (!alarmIds.isEmpty() && mutedIds.containsAll(alarmIds)) mutedIds.clear(); else mutedIds.addAll(alarmIds);
+                    long until = System.currentTimeMillis() + MUTE_MS;
+                    for (String id : alarmIds) mutedUntil.put(id, until);
                     updateAlarm(null, 0);
                 });
+                return START_STICKY;
+            case ACTION_UNMUTE:
+                handler.post(() -> { mutedUntil.clear(); updateAlarm(null, 0); });
                 return START_STICKY;
         }
         // The address is kept, so a restart by the system (null intent) watches the same node
@@ -226,7 +231,8 @@ public class NodeWatchService extends Service {
             alarms.sort((a, b) -> Double.compare(a.optDouble("tcpa"), b.optDouble("tcpa")));
             alarmIds.clear();
             for (JSONObject t : alarms) alarmIds.add(t.optString("id"));
-            mutedIds.retainAll(alarmIds);
+            long now = System.currentTimeMillis();
+            mutedUntil.values().removeIf(until -> until < now);
             updateAlarm(alarms.isEmpty() ? null : alarms.get(0), alarms.size());
             setWatchText(getString(R.string.watch_ok, base, n));
             long stamp = st.optLong("msgStamp", -1);
@@ -288,7 +294,7 @@ public class NodeWatchService extends Service {
             nm.cancel(ID_ALARM);
             return;
         }
-        boolean silenced = mutedIds.containsAll(alarmIds);
+        boolean silenced = mutedUntil.keySet().containsAll(alarmIds);
         if (silenced || !soundOn) stopSound(); else startSound();
         if (worst == null) return; // only the sound changed: the notification is refreshed at the next poll
         String title = getString(R.string.alarm_title, worst.optString("name"));

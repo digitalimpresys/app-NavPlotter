@@ -167,7 +167,7 @@
   }
   // The silence button on the alarm banner also silences the phone's own alarm
   document.addEventListener('click', (ev) => {
-    if (ev.target && ev.target.id === 'mute') setTimeout(() => plugin('NodeWatch', 'mute', {}).catch(() => {}), 0);
+    if (ev.target && ev.target.id === 'mute') setTimeout(() => plugin('NodeWatch', 'mute', { on: document.getElementById('alarm').classList.contains('muted') }).catch(() => {}), 0);
   }, true);
   // While the watch runs, the phone's alarm and the message notification are the sound: the page's own beeps
   // for the collision alarm (3) and for messages (2) would only add to them. The test button and the
