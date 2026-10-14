@@ -29,6 +29,12 @@
 
   const plugin = (name, method, opts) => cap.nativePromise(name, method, opts || {});
 
+  // A node on the boat WiFi is set as <name>.local, which Android does not always resolve: once the node has
+  // answered and given its address on the boat WiFi, that address is used instead
+  let nodeIp = null, failures = 0;
+  const target = () => nodeIp || base;
+  const isLocal = () => /^https?:\/\/[^/:]+\.local(:|\/|$)/.test(base);
+
   // ---------- fetch to the node through native HTTP ----------
   const webFetch = window.fetch.bind(window);
   window.fetch = function (resource, options) {
@@ -47,12 +53,21 @@
       if (!headers['Content-Type']) headers['Content-Type'] = 'text/plain';
     }
     const req = plugin('CapacitorHttp', 'request', {
-      url: base + url, method, headers, data, dataType: 'text', responseType: 'text',
+      url: target() + url, method, headers, data, dataType: 'text', responseType: 'text',
       connectTimeout: 3000, readTimeout: 5000
     }).then((r) => {
       let d = r.data;
+      if (url === '/api/state' && r.status === 200) {
+        let o = d;
+        if (typeof o === 'string') try { o = JSON.parse(o); } catch (e) { o = null; }
+        failures = 0;
+        nodeIp = o && isLocal() && o.sta && o.staIp ? 'http://' + o.staIp : null;
+      }
       if (d != null && typeof d !== 'string') d = JSON.stringify(d);
       return new Response(r.status === 204 ? null : d, { status: r.status, headers: r.headers });
+    }, (e) => {
+      if (url === '/api/state' && ++failures >= 3) nodeIp = null; // the address may have changed
+      throw e;
     });
     const signal = options.signal;
     if (!signal) return req;
@@ -80,7 +95,7 @@
     get() { return srcDesc.get.call(this); },
     set(v) {
       if (!nodePath(v)) { this._npUrl = null; return srcDesc.set.call(this, v); }
-      this._npUrl = base + v; this._npTries = 0;
+      this._npUrl = target() + v; this._npTries = 0;
       if (!this._npRetry) { this._npRetry = true; this.addEventListener('error', retryTile); }
       srcDesc.set.call(this, this._npUrl);
     },
@@ -114,7 +129,7 @@
     const a = ev.target && ev.target.closest && ev.target.closest('a[href^="/api/"]');
     if (!a) return;
     ev.preventDefault();
-    plugin('NodeWatch', 'shareFromNode', { url: base + a.getAttribute('href') }).catch(() => {});
+    plugin('NodeWatch', 'shareFromNode', { url: target() + a.getAttribute('href') }).catch(() => {});
   }, true);
 
   // ---------- "App" card at the end of Setup: node address and service state ----------

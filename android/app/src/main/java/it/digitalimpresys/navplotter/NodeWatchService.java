@@ -10,8 +10,8 @@ import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.ServiceInfo;
 import android.media.AudioAttributes;
-import android.media.MediaPlayer;
-import android.media.RingtoneManager;
+import android.media.AudioFormat;
+import android.media.AudioTrack;
 import android.net.ConnectivityManager;
 import android.net.Network;
 import android.net.NetworkCapabilities;
@@ -58,6 +58,10 @@ public class NodeWatchService extends Service {
     static volatile boolean running = false;
 
     private String base = DEFAULT_URL;
+    // A node on the boat WiFi is set as <name>.local, which Android does not always resolve: once the node has
+    // answered and given its address on the boat WiFi, that address is used instead
+    private String nodeIp = null;
+    private int failures = 0;
     private HandlerThread thread;
     private Handler handler;
     private PowerManager.WakeLock wakeLock;
@@ -66,7 +70,7 @@ public class NodeWatchService extends Service {
     private ConnectivityManager.NetworkCallback netCallback;
     private Network boundTo;
     private NotificationManager nm;
-    private MediaPlayer player;
+    private AudioTrack player;
     private boolean sounding = false;
     private Vibrator vibrator;
 
@@ -207,6 +211,10 @@ public class NodeWatchService extends Service {
                 readConfig();
             }
             lastOk = System.currentTimeMillis();
+            failures = 0;
+            String host = Uri.parse(base).getHost();
+            String staIp = st.optString("staIp", "");
+            nodeIp = host != null && host.endsWith(".local") && st.optBoolean("sta") && !staIp.isEmpty() ? "http://" + staIp : null;
             if (linkLostShown) { nm.cancel(ID_LINK); linkLostShown = false; }
             JSONArray targets = st.optJSONArray("targets");
             int n = targets == null ? 0 : targets.length();
@@ -242,7 +250,9 @@ public class NodeWatchService extends Service {
                     .setAutoCancel(true)
                     .build());
             }
-            if (!alarmIds.isEmpty()) { alarmIds.clear(); mutedIds.clear(); updateAlarm(null, 0); }
+            if (++failures >= 3) nodeIp = null; // the address on the boat WiFi may have changed
+            // The silenced boats are remembered: when the node answers again they stay silenced
+            if (!alarmIds.isEmpty()) { alarmIds.clear(); updateAlarm(null, 0); }
         }
         handler.postDelayed(this::poll, POLL_MS);
     }
@@ -255,7 +265,7 @@ public class NodeWatchService extends Service {
     }
 
     private String get(String path) throws Exception {
-        HttpURLConnection c = (HttpURLConnection) new URL(base + path).openConnection();
+        HttpURLConnection c = (HttpURLConnection) new URL((nodeIp != null ? nodeIp : base) + path).openConnection();
         c.setConnectTimeout(2500);
         c.setReadTimeout(4000);
         c.setUseCaches(false);
@@ -306,26 +316,46 @@ public class NodeWatchService extends Service {
         return String.format(Locale.ROOT, "%d:%02d", m, sec);
     }
 
+    // The same beep as the node and its web app: three short 2700 Hz beeps every three seconds, on the alarm
+    // stream so it sounds in silent mode too
+    private static final int RATE = 22050;
+
+    private static short[] beepLoop() {
+        short[] buf = new short[RATE * 3];
+        int half = RATE / 2700 / 2;
+        for (int b = 0; b < 3; b++) {
+            int start = (int) (RATE * 0.24 * b), len = (int) (RATE * 0.13);
+            for (int i = 0; i < len; i++) buf[start + i] = (short) (((i / half) % 2 == 0) ? 16000 : -16000);
+        }
+        return buf;
+    }
+
     private void startSound() {
         if (sounding) return;
         sounding = true;
         try {
-            Uri uri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM);
-            if (uri == null) uri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE);
-            player = new MediaPlayer();
-            player.setAudioAttributes(new AudioAttributes.Builder()
-                .setUsage(AudioAttributes.USAGE_ALARM)
-                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                .build());
-            player.setDataSource(this, uri);
-            player.setLooping(true);
-            player.prepare();
-            player.start();
+            short[] buf = beepLoop();
+            player = new AudioTrack.Builder()
+                .setAudioAttributes(new AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_ALARM)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                    .build())
+                .setAudioFormat(new AudioFormat.Builder()
+                    .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                    .setSampleRate(RATE)
+                    .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
+                    .build())
+                .setBufferSizeInBytes(buf.length * 2)
+                .setTransferMode(AudioTrack.MODE_STATIC)
+                .build();
+            player.write(buf, 0, buf.length);
+            player.setLoopPoints(0, buf.length, -1);
+            player.play();
         } catch (Exception e) {
             Log.w(TAG, "alarm sound: " + e);
             if (player != null) { player.release(); player = null; }
         }
-        long[] pattern = { 0, 400, 250, 400, 250, 400, 900 };
+        long[] pattern = { 0, 130, 110, 130, 110, 130, 2400 };
         if (Build.VERSION.SDK_INT >= 26) vibrator.vibrate(VibrationEffect.createWaveform(pattern, 0),
             new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ALARM).build());
         else vibrator.vibrate(pattern, 0);
