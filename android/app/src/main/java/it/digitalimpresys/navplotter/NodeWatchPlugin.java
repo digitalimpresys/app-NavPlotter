@@ -84,11 +84,15 @@ public class NodeWatchPlugin extends Plugin {
     public void ignoreBatteryOptimizations(PluginCall call) {
         Context ctx = getContext();
         PowerManager pm = (PowerManager) ctx.getSystemService(Context.POWER_SERVICE);
-        if (!pm.isIgnoringBatteryOptimizations(ctx.getPackageName())) {
+        boolean ignoring = pm.isIgnoringBatteryOptimizations(ctx.getPackageName());
+        // ask=false only reports the state, for the App card
+        if (!ignoring && call.getBoolean("ask", true)) {
             Intent i = new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:" + ctx.getPackageName()));
             getActivity().startActivity(i);
         }
-        call.resolve();
+        JSObject r = new JSObject();
+        r.put("ignoring", ignoring);
+        call.resolve(r);
     }
 
     /** Downloads a file from the node (the GPX track) and offers it to the share sheet, to save or send. */

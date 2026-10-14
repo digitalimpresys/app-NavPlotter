@@ -163,7 +163,7 @@
   // ---------- native watch service (alarm and messages with the screen off) ----------
   let watching = false;
   function startWatch() {
-    plugin('NodeWatch', 'start', { url: base }).then(() => { watching = true; }, (e) => console.warn('NodeWatch', e));
+    plugin('NodeWatch', 'start', { url: base }).then(() => { watching = true; renderAppCard(); }, (e) => console.warn('NodeWatch', e));
   }
   // The silence button on the alarm banner also silences the phone's own alarm
   document.addEventListener('click', (ev) => {
@@ -220,10 +220,12 @@
       '<details style="margin-top:10px"><summary class="hint">' + T('Indirizzo a mano', 'Address by hand') + '</summary>' +
       '<input type="text" id="appNode" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" style="margin-top:8px">' +
       '<div class="btns"><button class="btn sec" id="appNodeSave">' + T('Usa questo indirizzo', 'Use this address') + '</button></div></details>' +
-      '<div class="btns"><button class="btn sec" id="appBattery">' + T('Non ottimizzare la batteria', 'Ignore battery optimisation') + '</button>' +
-      '<button class="btn sec" id="appStop">' + T('Ferma la guardia', 'Stop watching') + '</button></div>' +
-      '<div class="hint">' + T("La guardia resta attiva a schermo spento e suona l'allarme di abbordo e i messaggi. Si ferma dalla notifica o da qui.",
-        'The watch keeps running with the screen off and sounds the collision alarm and messages. Stop it from the notification or here.') + '</div>';
+      '<div class="kv" style="margin-top:10px"><span>' + T('Guardia', 'Watch') + '</span><span>' + (watching ? T('attiva', 'on') : T('ferma', 'off')) + '</span>' +
+      '<span>' + T('Batteria', 'Battery') + '</span><span>' + (batteryFree === null ? '?' : batteryFree ? T('non ottimizzata, va bene', 'not optimised, good') : T('ottimizzata: Android può fermare la guardia', 'optimised: Android may stop the watch')) + '</span></div>' +
+      '<div class="btns">' + (batteryFree ? '' : '<button class="btn sec" id="appBattery">' + T('Non ottimizzare la batteria', 'Ignore battery optimisation') + '</button>') +
+      '<button class="btn sec" id="appStop">' + (watching ? T('Ferma la guardia', 'Stop watching') : T('Avvia la guardia', 'Start watching')) + '</button></div>' +
+      '<div class="hint">' + T("La guardia resta attiva a schermo spento e suona l'allarme di abbordo e i messaggi. Si ferma dalla notifica o da qui, a fine navigazione.",
+        'The watch keeps running with the screen off and sounds the collision alarm and messages. Stop it from the notification or here, when you are done sailing.') + '</div>';
     document.getElementById('appNode').value = base;
     document.getElementById('appFind').onclick = () => findPaired(true).then((ok) => { if (!ok) alert(T('Nodo abbinato non trovato. Il telefono è sulla sua WiFi o su quella di bordo?', 'Paired node not found. Is the phone on its WiFi or on the boat WiFi?')); });
     const fg = document.getElementById('appForget');
@@ -235,9 +237,18 @@
     const po = document.getElementById('appPairOther');
     if (po) po.onclick = () => { pair(otherNode.id, otherNode.name); location.reload(); };
     document.getElementById('appNodeSave').onclick = () => { window.NavPlotterApp.setNode(document.getElementById('appNode').value); location.reload(); };
-    document.getElementById('appBattery').onclick = () => plugin('NodeWatch', 'ignoreBatteryOptimizations', {}).catch(() => {});
-    document.getElementById('appStop').onclick = () => { watching = false; plugin('NodeWatch', 'stop', {}).catch(() => {}); };
+    const bt = document.getElementById('appBattery');
+    if (bt) bt.onclick = () => plugin('NodeWatch', 'ignoreBatteryOptimizations', {}).catch(() => {});
+    document.getElementById('appStop').onclick = () => {
+      if (watching) { watching = false; plugin('NodeWatch', 'stop', {}).catch(() => {}); renderAppCard(); } else startWatch();
+    };
   }
+  // Battery state: read again when the user comes back from Android's dialog
+  let batteryFree = null;
+  function checkBattery() {
+    plugin('NodeWatch', 'ignoreBatteryOptimizations', { ask: false }).then((r) => { batteryFree = !!(r && r.ignoring); renderAppCard(); }, () => {});
+  }
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) checkBattery(); });
 
   // ---------- boat WiFi: what was typed once is offered to the next node ----------
   // Android does not let an app read the password of a saved WiFi, so it is typed once; the app remembers it
@@ -255,5 +266,5 @@
     if (pw && !pw.value && p1 && ss && ss.value === s1) pw.value = p1;
   });
 
-  document.addEventListener('DOMContentLoaded', () => { addSetupCard(); startWatch(); });
+  document.addEventListener('DOMContentLoaded', () => { addSetupCard(); startWatch(); checkBattery(); });
 })();
