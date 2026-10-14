@@ -64,23 +64,50 @@
   };
 
   // ---------- chart tiles: <img>/Image() with /tiles/... go to the node ----------
+  // The page never asks again for a tile that failed, and a tile can fail while the app is being bound to the
+  // node's WiFi (Android drops the requests in flight). So a failed tile is asked again a few times, unless the
+  // node says it does not have it (open sea has no tiles).
   const srcDesc = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, 'src');
+  function retryTile() {
+    const img = this, url = img._npUrl, n = (img._npTries || 0) + 1;
+    if (n > 5 || !url) return;
+    img._npTries = n;
+    const again = () => setTimeout(() => { if (img._npUrl === url) srcDesc.set.call(img, url + '?r=' + n); }, 1000 * n);
+    plugin('CapacitorHttp', 'request', { url, method: 'HEAD', connectTimeout: 3000, readTimeout: 3000 })
+      .then((r) => { if (r.status !== 404) again(); }, again);
+  }
   Object.defineProperty(HTMLImageElement.prototype, 'src', {
     get() { return srcDesc.get.call(this); },
-    set(v) { srcDesc.set.call(this, nodePath(v) ? base + v : v); },
+    set(v) {
+      if (!nodePath(v)) { this._npUrl = null; return srcDesc.set.call(this, v); }
+      this._npUrl = base + v; this._npTries = 0;
+      if (!this._npRetry) { this._npRetry = true; this.addEventListener('error', retryTile); }
+      srcDesc.set.call(this, this._npUrl);
+    },
     configurable: true, enumerable: true
   });
 
   // ---------- native watch service (alarm and messages with the screen off) ----------
+  let watching = false;
   function startWatch() {
-    plugin('NodeWatch', 'start', { url: base }).catch((e) => console.warn('NodeWatch', e));
+    plugin('NodeWatch', 'start', { url: base }).then(() => { watching = true; }, (e) => console.warn('NodeWatch', e));
   }
   // The silence button on the alarm banner also silences the phone's own alarm
   document.addEventListener('click', (ev) => {
     if (ev.target && ev.target.id === 'mute') setTimeout(() => plugin('NodeWatch', 'mute', {}).catch(() => {}), 0);
   }, true);
-  // While the app is on screen, the page shows the alarm; the service plays it anyway, so the page's beep is
-  // left as it is (it only plays when the page has been touched once).
+  // While the watch runs, the phone's alarm and the message notification are the sound: the page's own beeps
+  // for the collision alarm (3) and for messages (2) would only add to them. The test button and the
+  // waypoint-reached beep (1) still play.
+  let testing = false;
+  document.addEventListener('click', (ev) => {
+    if (ev.target && ev.target.id === 'testSound') { testing = true; setTimeout(() => { testing = false; }, 0); }
+  }, true);
+  document.addEventListener('DOMContentLoaded', () => {
+    const pageBeep = window.beep;
+    if (typeof pageBeep !== 'function') return;
+    window.beep = (n) => { if (!watching || testing || n === 1) pageBeep(n); };
+  });
 
   // The GPX link cannot download inside the app: it opens in the browser, which saves the file
   document.addEventListener('click', (ev) => {
@@ -111,7 +138,7 @@
     document.getElementById('appNode').value = base;
     document.getElementById('appNodeSave').onclick = () => { window.NavPlotterApp.setNode(document.getElementById('appNode').value); location.reload(); };
     document.getElementById('appBattery').onclick = () => plugin('NodeWatch', 'ignoreBatteryOptimizations', {}).catch(() => {});
-    document.getElementById('appStop').onclick = () => plugin('NodeWatch', 'stop', {}).catch(() => {});
+    document.getElementById('appStop').onclick = () => { watching = false; plugin('NodeWatch', 'stop', {}).catch(() => {}); };
   }
 
   document.addEventListener('DOMContentLoaded', () => { addSetupCard(); startWatch(); });
