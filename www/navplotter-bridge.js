@@ -213,7 +213,8 @@
       '<span>' + T('Indirizzo', 'Address') + '</span><span>' + escH(target()) + (searching ? ' · ' + T('cerco...', 'searching...') : '') + '</span></div>' +
       (otherNode ? '<div class="hint" style="color:var(--red)">' + T('A questo indirizzo risponde ', 'This address answers as ') + '<b>' + escH(otherNode.name) + '</b> (ID ' + escH(otherNode.id) + T('), non il nodo abbinato.', '), not the paired node.') + '</div>' : '') +
       '<div class="btns"><button class="btn" id="appFind">' + T('Cerca il nodo abbinato', 'Find the paired node') + '</button>' +
-      (otherNode ? '<button class="btn sec" id="appPairOther">' + T('Abbina ', 'Pair ') + escH(otherNode.name) + '</button>' : '') + '</div>' +
+      (otherNode ? '<button class="btn sec" id="appPairOther">' + T('Abbina ', 'Pair ') + escH(otherNode.name) + '</button>' : '') +
+      (paired.id ? '<button class="btn sec" id="appForget">' + T('Dimentica il nodo', 'Forget the node') + '</button>' : '') + '</div>' +
       '<div class="hint">' + T("L'app segue il nodo abbinato col suo ID, anche se cambia nome o passa dalla sua WiFi a quella di bordo. Per abbinarne un altro collegati alla sua WiFi NavPlotter-… e tocca Abbina.",
         'The app follows the paired node by its ID, even when its name changes or it moves from its own WiFi to the boat WiFi. To pair another one, join its NavPlotter-… WiFi and tap Pair.') + '</div>' +
       '<details style="margin-top:10px"><summary class="hint">' + T('Indirizzo a mano', 'Address by hand') + '</summary>' +
@@ -225,6 +226,12 @@
         'The watch keeps running with the screen off and sounds the collision alarm and messages. Stop it from the notification or here.') + '</div>';
     document.getElementById('appNode').value = base;
     document.getElementById('appFind').onclick = () => findPaired(true).then((ok) => { if (!ok) alert(T('Nodo abbinato non trovato. Il telefono è sulla sua WiFi o su quella di bordo?', 'Paired node not found. Is the phone on its WiFi or on the boat WiFi?')); });
+    const fg = document.getElementById('appForget');
+    if (fg) fg.onclick = () => {
+      if (!confirm(T("Dimenticare il nodo abbinato? L'app si abbinerà al prossimo nodo a cui ti colleghi.", 'Forget the paired node? The app will pair with the next node you connect to.'))) return;
+      ['np-pair-id', 'np-pair-name', 'np-pair-sta', 'np-node'].forEach((k) => store(k, null));
+      location.reload();
+    };
     const po = document.getElementById('appPairOther');
     if (po) po.onclick = () => { pair(otherNode.id, otherNode.name); location.reload(); };
     document.getElementById('appNodeSave').onclick = () => { window.NavPlotterApp.setNode(document.getElementById('appNode').value); location.reload(); };
