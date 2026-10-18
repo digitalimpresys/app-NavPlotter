@@ -681,7 +681,7 @@
       [['light', L('Crociera veloce, leggera', 'Fast, light cruiser')], ['cruiser', L('Crociera', 'Cruiser')], ['heavy', L('Crociera pesante, vecchia', 'Heavy or older cruiser')]]
         .map((k) => '<option value="' + k[0] + '"' + (plan.kind === k[0] ? ' selected' : '') + '>' + k[1] + '</option>').join('') + '</select>' +
       '<div class="btns"><button class="btn sec" id="polGen">' + L('Genera', 'Make') + '</button>' +
-      '<label class="btn sec" style="margin:0">' + L('Importa file (.pol, .csv, .txt)', 'Import file (.pol, .csv, .txt)') + '<input type="file" id="polFile" accept=".pol,.csv,.txt,text/plain" style="display:none"></label></div>' +
+      '<label class="btn sec" style="margin:0">' + L('Importa file (.pol, .csv, .txt)', 'Import file (.pol, .csv, .txt)') + '<input type="file" id="polFile" style="display:none"></label></div>' +
       '<label>' + L('Tabella: velocità della barca in nodi, una riga per angolo al vento, una colonna per velocità del vento', 'Table: boat speed in knots, a row per wind angle, a column per wind speed') + '</label>' +
       '<textarea id="polTxt" spellcheck="false" style="width:100%;height:220px;font:13px/1.3 monospace;padding:8px;border-radius:9px;border:1px solid var(--line);background:#0b1d33;color:var(--text)">' + esc(load('np-polar') || '') + '</textarea>' +
       '<div class="btns"><button class="btn" id="polSave">' + L('Salva la tabella', 'Save the table') + '</button><button class="btn sec" id="polClose">' + L('Chiudi', 'Close') + '</button></div>' +
