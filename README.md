@@ -17,6 +17,8 @@ impacchettata con Capacitor, che si collega al nodo via WiFi e funziona senza in
     un tocco sul mare mostra vento, raffiche, corrente e onda in quel punto;
   - nella pagina Waypoint la scheda "Pianifica": per una rotta, partenza e velocità media, calcola orari,
     vento, corrente e onda per ogni tratta, con avvisi e il confronto tra altri orari di partenza;
+    con "A vela" simula i bordi: virate di bolina (angolo al vento e distanza massima dalla rotta
+    impostabili, oppure solo sulle lay-line) e strambate in poppa piena, con miglia percorse e tempo in più;
     "Mostra sulla carta" disegna il piano con la barca nella posizione stimata all'ora scelta.
   - Previsioni da [Open-Meteo](https://open-meteo.com) (dati CC BY 4.0), scaricate quando c'è internet e
     tenute sul telefono per l'uso in mare. Sulla WiFi del nodo l'app esce su internet con i dati mobili
