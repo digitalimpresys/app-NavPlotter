@@ -37,9 +37,19 @@
     const q = '?latitude=' + pts.map((p) => p.lat.toFixed(3)).join(',') + '&longitude=' + pts.map((p) => p.lon.toFixed(3)).join(',') +
       '&timeformat=unixtime&forecast_days=' + days;
     const wind = getJSON('https://api.open-meteo.com/v1/forecast' + q + '&hourly=wind_speed_10m,wind_direction_10m,wind_gusts_10m,weather_code,cape,precipitation&wind_speed_unit=kn');
-    const sea = getJSON('https://marine-api.open-meteo.com/v1/marine' + q + '&hourly=ocean_current_velocity,ocean_current_direction,wave_height').catch(() => null);
+    // The sea forecast is asked in groups of 40 points, each tried twice: a failure leaves only that group
+    // without current and waves, instead of the whole chart
+    const seaQ = (list) => '?latitude=' + list.map((p) => p.lat.toFixed(3)).join(',') + '&longitude=' + list.map((p) => p.lon.toFixed(3)).join(',') +
+      '&timeformat=unixtime&forecast_days=' + days + '&hourly=ocean_current_velocity,ocean_current_direction,wave_height';
+    const groups = [];
+    for (let i = 0; i < pts.length; i += 40) groups.push(pts.slice(i, i + 40));
+    const seaGroup = (list) => {
+      const url = 'https://marine-api.open-meteo.com/v1/marine' + seaQ(list), one = (r) => (Array.isArray(r) ? r : [r]);
+      return getJSON(url).catch(() => getJSON(url)).then(one, (e) => { console.warn('meteo: mare', e); return list.map(() => null); });
+    };
+    const sea = Promise.all(groups.map(seaGroup)).then((parts) => [].concat(...parts));
     return Promise.all([wind, sea]).then(([w, s]) => {
-      const wl = Array.isArray(w) ? w : [w], sl = s ? (Array.isArray(s) ? s : [s]) : [];
+      const wl = Array.isArray(w) ? w : [w], sl = s || [];
       const t0 = wl[0].hourly.time[0], nt = wl[0].hourly.time.length;
       const cells = pts.map((p, i) => {
         const h = wl[i].hourly, wk = TO_KN[(wl[i].hourly_units || {}).wind_speed_10m] || 1;
@@ -213,11 +223,15 @@
     c.fillStyle = col; c.beginPath(); c.arc(x, y, 2.2, 0, 7); c.fill();
   }
   function arrow(c, x, y, to, kn) {
-    const col = curCol(kn), len = Math.min(38, 10 + kn * 26);
+    const col = curCol(kn), len = Math.min(38, 14 + kn * 24);
     c.save(); c.translate(x, y); c.rotate(to * D2R); c.lineCap = 'round'; c.lineJoin = 'round';
     c.beginPath(); c.moveTo(0, len / 2); c.lineTo(0, -len / 2); c.moveTo(-5, -len / 2 + 7); c.lineTo(0, -len / 2); c.lineTo(5, -len / 2 + 7);
     c.strokeStyle = 'rgba(255,255,255,.9)'; c.lineWidth = 5; c.stroke(); c.strokeStyle = col; c.lineWidth = 2.4; c.stroke();
     c.restore();
+    // The speed under the arrow: in closed gulfs the currents are often a tenth of a knot or less
+    const s = kn < 0.1 ? kn.toFixed(2) : kn.toFixed(1);
+    c.font = '600 11px sans-serif'; c.textAlign = 'center'; c.lineJoin = 'round';
+    c.lineWidth = 3; c.strokeStyle = 'rgba(255,255,255,.9)'; c.strokeText(s, x, y + 27); c.fillStyle = col; c.fillText(s, x, y + 27);
   }
 
   function drawOverlay() {
@@ -228,14 +242,19 @@
     if (f == null) return;
     if (mx.layer === 'storm') { drawStorms(c, v, f); return; }
     const step = 72;
+    let seen = 0, cur = 0;
     for (let y = step / 2; y < v.h; y += step) {
       for (let x = step / 2; x < v.w; x += step) {
         const p = v.ll(x, y), s = gridAt(p.lat, p.lon, f);
         if (!s) continue;
+        seen++;
         if (mx.layer === 'wind') barb(c, x, y, windFrom(s), windKn(s));
-        else if (s.cu != null && curKn(s) >= 0.05) arrow(c, x, y, curTo(s), curKn(s));
+        else if (s.cu != null) { cur++; if (curKn(s) >= 0.01) arrow(c, x, y, curTo(s), curKn(s)); }
       }
     }
+    // Where the sea model gives no current at all, the bar says so instead of showing an empty chart
+    const none = mx.layer === 'current' && seen > 0 && cur === 0;
+    if (none !== mx.noCur) { mx.noCur = none; renderBar(); }
   }
   // Rain in blue, unstable air in yellow, thunderstorms in orange and red, a flash where a storm is forecast
   function drawStorms(c, v, f) {
@@ -351,7 +370,8 @@
       $('mxPlanTxt').textContent = L('Piano: ', 'Plan: ') + plan.name + ' · ' + (pos ? L('barca alla posizione stimata', 'boat at the estimated position') : mx.time < r.dep ? L('prima della partenza', 'before departure') : L('arrivata', 'arrived'));
     }
     const out = grid && !coversView();
-    $('mxNoteTxt').textContent = mx.busy ? L('Scarico le previsioni...', 'Downloading the forecast...')
+    $('mxNoteTxt').textContent = mx.layer === 'current' && mx.noCur && !mx.busy ? L('Nessun dato di corrente per quest\'area: tocca ↻ per riscaricare', 'No current data for this area: tap ↻ to download again')
+      : mx.busy ? L('Scarico le previsioni...', 'Downloading the forecast...')
       : mx.err ? (grid ? L('Senza internet: previsioni del ', 'No internet: forecast of ') + fmtAge(grid.at) : L('Nessuna previsione: serve internet', 'No forecast yet: internet needed'))
       : grid ? (out ? L('Parte della carta è fuori dall\'area scaricata: tocca ↻', 'Part of the chart is outside the downloaded area: tap ↻') : 'Open-Meteo · ' + fmtAge(grid.at)) : '';
   }
