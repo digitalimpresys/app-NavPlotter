@@ -36,20 +36,24 @@
   function forecast(pts, days) {
     const q = '?latitude=' + pts.map((p) => p.lat.toFixed(3)).join(',') + '&longitude=' + pts.map((p) => p.lon.toFixed(3)).join(',') +
       '&timeformat=unixtime&forecast_days=' + days;
-    const wind = getJSON('https://api.open-meteo.com/v1/forecast' + q + '&hourly=wind_speed_10m,wind_direction_10m,wind_gusts_10m&wind_speed_unit=kn');
+    const wind = getJSON('https://api.open-meteo.com/v1/forecast' + q + '&hourly=wind_speed_10m,wind_direction_10m,wind_gusts_10m,weather_code,cape,precipitation&wind_speed_unit=kn');
     const sea = getJSON('https://marine-api.open-meteo.com/v1/marine' + q + '&hourly=ocean_current_velocity,ocean_current_direction,wave_height').catch(() => null);
     return Promise.all([wind, sea]).then(([w, s]) => {
       const wl = Array.isArray(w) ? w : [w], sl = s ? (Array.isArray(s) ? s : [s]) : [];
       const t0 = wl[0].hourly.time[0], nt = wl[0].hourly.time.length;
       const cells = pts.map((p, i) => {
         const h = wl[i].hourly, wk = TO_KN[(wl[i].hourly_units || {}).wind_speed_10m] || 1;
-        const c = { wu: [], wv: [], wg: [], cu: null, cv: null, wh: null };
+        // Thunderstorms: weather code (95-99 storm, 80-82 showers), instability (CAPE, J/kg), rain (mm in the hour)
+        const c = { wu: [], wv: [], wg: [], cu: null, cv: null, wh: null, wc: [], cape: [], pr: [] };
         for (let k = 0; k < nt; k++) {
           const sp = h.wind_speed_10m[k], d = h.wind_direction_10m[k];
           // Wind direction is where it comes from: the vector goes the other way
           c.wu.push(sp == null || d == null ? null : r1(-sp * wk * Math.sin(d * D2R)));
           c.wv.push(sp == null || d == null ? null : r1(-sp * wk * Math.cos(d * D2R)));
           c.wg.push(h.wind_gusts_10m[k] == null ? null : r1(h.wind_gusts_10m[k] * wk));
+          c.wc.push(h.weather_code ? h.weather_code[k] : null);
+          c.cape.push(h.cape && h.cape[k] != null ? Math.round(h.cape[k]) : null);
+          c.pr.push(h.precipitation && h.precipitation[k] != null ? r1(h.precipitation[k]) : null);
         }
         const m = sl[i] && sl[i].hourly;
         if (m && m.time && m.time.length) {
@@ -81,21 +85,41 @@
     const u = lin(c.wu, f), v = lin(c.wv, f);
     if (u == null || v == null) return null;
     const cu = lin(c.cu, f), cv = lin(c.cv, f);
-    return { u, v, g: lin(c.wg, f), cu: cu == null || cv == null ? null : cu, cv: cu == null || cv == null ? null : cv, wh: lin(c.wh, f) };
+    const wc = c.wc ? c.wc[Math.min(c.wc.length - 1, Math.round(f))] : null;
+    return { u, v, g: lin(c.wg, f), cu: cu == null || cv == null ? null : cu, cv: cu == null || cv == null ? null : cv, wh: lin(c.wh, f),
+      wc: wc == null ? null : wc, cape: lin(c.cape, f), pr: lin(c.pr, f) };
   }
   // Average of a few samples with weights; current and waves only where the sea model has them
   function blend(list) {
-    const o = { u: 0, v: 0, g: 0, cu: 0, cv: 0, wh: 0 }, wt = { w: 0, g: 0, c: 0, h: 0 };
+    const o = { u: 0, v: 0, g: 0, cu: 0, cv: 0, wh: 0, cape: 0, pr: 0, wc: null }, wt = { w: 0, g: 0, c: 0, h: 0, k: 0, p: 0 };
     for (const [s, k] of list) {
       if (!s || k <= 0) continue;
       o.u += s.u * k; o.v += s.v * k; wt.w += k;
       if (s.g != null) { o.g += s.g * k; wt.g += k; }
       if (s.cu != null) { o.cu += s.cu * k; o.cv += s.cv * k; wt.c += k; }
       if (s.wh != null) { o.wh += s.wh * k; wt.h += k; }
+      if (s.cape != null) { o.cape += s.cape * k; wt.k += k; }
+      if (s.pr != null) { o.pr += s.pr * k; wt.p += k; }
+      // The weather code is not averaged: the worst of the nearby points counts
+      if (s.wc != null && k > 0.15) o.wc = Math.max(o.wc == null ? 0 : o.wc, s.wc);
     }
     if (!wt.w) return null;
-    return { u: o.u / wt.w, v: o.v / wt.w, g: wt.g ? o.g / wt.g : null, cu: wt.c ? o.cu / wt.c : null, cv: wt.c ? o.cv / wt.c : null, wh: wt.h ? o.wh / wt.h : null };
+    return { u: o.u / wt.w, v: o.v / wt.w, g: wt.g ? o.g / wt.g : null, cu: wt.c ? o.cu / wt.c : null, cv: wt.c ? o.cv / wt.c : null, wh: wt.h ? o.wh / wt.h : null,
+      cape: wt.k ? o.cape / wt.k : null, pr: wt.p ? o.pr / wt.p : null, wc: o.wc };
   }
+  // Thunderstorm risk: 0 none, 1 unstable air or showers, 2 thunderstorm, 3 strong thunderstorm or hail
+  function stormLvl(s) {
+    if (!s) return 0;
+    const wc = s.wc, cape = s.cape || 0, pr = s.pr || 0;
+    if (wc === 96 || wc === 97 || wc === 99) return 3;
+    if (wc === 95) return 2;
+    if (cape >= 1500 && pr >= 0.5) return 2;
+    if ((cape >= 800 && pr >= 0.2) || (wc >= 80 && wc <= 82) || cape >= 1500) return 1;
+    return 0;
+  }
+  const STORM_IT = ['', 'aria instabile, possibili rovesci', 'temporale', 'temporale forte'], STORM_EN = ['', 'unstable air, showers possible', 'thunderstorm', 'strong thunderstorm'];
+  const stormTxt = (l) => (isIt() ? STORM_IT : STORM_EN)[l];
+  const stormCol = ['', 'rgba(253,216,53,.38)', 'rgba(251,140,0,.45)', 'rgba(229,57,53,.52)'];
   const windKn = (s) => Math.hypot(s.u, s.v);
   const windFrom = (s) => (Math.atan2(-s.u, -s.v) * R2D + 360) % 360;
   const curKn = (s) => (s.cu == null ? null : Math.hypot(s.cu, s.cv));
@@ -146,9 +170,10 @@
     const v = view();
     if (!v.w) return;
     const fresh = grid && Date.now() - grid.at < 3 * H * 1000 && coversView();
-    if (!force && (fresh || Date.now() - mx.tried < 60000)) return;
+    // After a failed download, wait a minute before trying again on its own
+    if (!force && (fresh || (mx.err && Date.now() - mx.tried < 60000) || Date.now() - mx.tried < 3000)) return;
     const a = v.ll(-v.w / 3, -v.h / 3), b = v.ll(v.w * 4 / 3, v.h * 4 / 3);
-    const n = 7, lats = [], lons = [];
+    const n = 10, lats = [], lons = [];
     for (let i = 0; i < n; i++) { lats.push(b.lat + (a.lat - b.lat) * i / (n - 1)); lons.push(a.lon + (b.lon - a.lon) * i / (n - 1)); }
     const pts = [];
     for (const la of lats) for (const lo of lons) pts.push({ lat: la, lon: lo });
@@ -201,6 +226,7 @@
     if (!mx.layer || !grid) return;
     const f = tIdx(grid, mx.time);
     if (f == null) return;
+    if (mx.layer === 'storm') { drawStorms(c, v, f); return; }
     const step = 72;
     for (let y = step / 2; y < v.h; y += step) {
       for (let x = step / 2; x < v.w; x += step) {
@@ -210,6 +236,40 @@
         else if (s.cu != null && curKn(s) >= 0.05) arrow(c, x, y, curTo(s), curKn(s));
       }
     }
+  }
+  // Rain in blue, unstable air in yellow, thunderstorms in orange and red, a flash where a storm is forecast
+  function drawStorms(c, v, f) {
+    // Worked out on a coarse lattice in a small canvas, then stretched over the chart with smoothing,
+    // so that the areas have soft edges instead of squares
+    const step = 12, nw = Math.ceil(v.w / step) + 1, nh = Math.ceil(v.h / step) + 1;
+    const off = drawStorms.cv || (drawStorms.cv = document.createElement('canvas'));
+    off.width = nw; off.height = nh;
+    const o = off.getContext('2d'), img = o.createImageData(nw, nh), d = img.data;
+    const RGBA = [[253, 216, 53, 0.42], [251, 140, 0, 0.5], [229, 57, 53, 0.58]];
+    for (let j = 0; j < nh; j++) {
+      for (let i = 0; i < nw; i++) {
+        const p = v.ll(i * step, j * step), s = gridAt(p.lat, p.lon, f);
+        if (!s) continue;
+        const l = stormLvl(s), pr = s.pr || 0;
+        const col = l ? RGBA[l - 1] : pr >= 2 ? [33, 150, 243, 0.38] : pr >= 0.3 ? [33, 150, 243, 0.22] : null;
+        if (!col) continue;
+        const k = (j * nw + i) * 4;
+        d[k] = col[0]; d[k + 1] = col[1]; d[k + 2] = col[2]; d[k + 3] = Math.round(col[3] * 255);
+      }
+    }
+    o.putImageData(img, 0, 0);
+    c.save(); c.imageSmoothingEnabled = true; c.imageSmoothingQuality = 'high';
+    c.drawImage(off, 0, 0, nw, nh, 0, 0, nw * step, nh * step);
+    c.restore();
+    c.font = '20px sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle';
+    for (let y = 36; y < v.h; y += 72) {
+      for (let x = 36; x < v.w; x += 72) {
+        const p = v.ll(x, y), l = stormLvl(gridAt(p.lat, p.lon, f));
+        if (l < 2) continue;
+        c.lineWidth = 3; c.strokeStyle = 'rgba(255,255,255,.9)'; c.strokeText('\u26A1', x, y); c.fillStyle = l === 3 ? '#b71c1c' : '#e65100'; c.fillText('\u26A1', x, y);
+      }
+    }
+    c.textBaseline = 'alphabetic';
   }
   const pageDraw = window.drawMap;
   window.drawMap = function () {
@@ -244,7 +304,7 @@
   $('mapBtns').appendChild(btn);
   const bar = document.createElement('div');
   bar.id = 'mxBar';
-  bar.innerHTML = '<div class="seg"><button id="mxWind"></button><button id="mxCur"></button></div>' +
+  bar.innerHTML = '<div class="seg"><button id="mxWind"></button><button id="mxCur"></button><button id="mxStorm"></button></div>' +
     '<div id="mxTime"><button id="mxPrev">&#9664;</button><b id="mxWhen"></b><button id="mxNext">&#9654;</button></div>' +
     '<input type="range" id="mxSlide" step="3600"><div id="mxLeg"></div>' +
     '<div id="mxPlan"><span id="mxPlanTxt"></span><button id="mxPlanOff">&times;</button></div>' +
@@ -255,12 +315,14 @@
 
   function setLayer(k) {
     mx.layer = k;
-    if (k) { mx.last = k; save('np-mx-layer', k); clampTime(); ensureGrid(false); }
+    // A forecast saved by an older version has no thunderstorm data: it is downloaded again
+    if (k) { mx.last = k; save('np-mx-layer', k); clampTime(); ensureGrid(k === 'storm' && !!grid && !grid.cells[0].wc); }
     renderBar(); drawMap();
   }
   btn.onclick = () => setLayer(mx.layer ? null : mx.last);
   $('mxWind').onclick = () => setLayer('wind');
   $('mxCur').onclick = () => setLayer('current');
+  $('mxStorm').onclick = () => setLayer('storm');
   $('mxPrev').onclick = () => { mx.time -= H; clampTime(); renderBar(); drawMap(); };
   $('mxNext').onclick = () => { mx.time += H; clampTime(); renderBar(); drawMap(); };
   $('mxSlide').oninput = (e) => { mx.time = +e.target.value; renderBar(true); drawMap(); };
@@ -270,13 +332,16 @@
   function renderBar(sliding) {
     btn.classList.toggle('on', !!mx.layer);
     bar.classList.toggle('on', !!mx.layer || (plan.show && !!plan.res));
-    $('mxWind').textContent = L('Vento', 'Wind'); $('mxCur').textContent = L('Corrente', 'Current');
-    $('mxWind').classList.toggle('on', mx.layer === 'wind'); $('mxCur').classList.toggle('on', mx.layer === 'current');
+    $('mxWind').textContent = L('Vento', 'Wind'); $('mxCur').textContent = L('Corrente', 'Current'); $('mxStorm').textContent = L('Temporali', 'Storms');
+    $('mxWind').classList.toggle('on', mx.layer === 'wind'); $('mxCur').classList.toggle('on', mx.layer === 'current'); $('mxStorm').classList.toggle('on', mx.layer === 'storm');
     $('mxWhen').textContent = fmtWhen(mx.time);
     const sl = $('mxSlide');
     if (grid && !sliding) { sl.min = Math.max(grid.t0, nowHour() - H); sl.max = grid.t0 + (grid.nt - 1) * H; sl.value = mx.time; }
     sl.style.display = grid ? '' : 'none';
-    $('mxLeg').innerHTML = mx.layer === 'current'
+    $('mxLeg').innerHTML = mx.layer === 'storm'
+      ? [['rgba(33,150,243,.5)', L('pioggia', 'rain')], [stormCol[1], L('instabile', 'unstable')], [stormCol[2], L('temporale', 'storm')], [stormCol[3], L('forte', 'strong')]]
+        .map((x) => '<span><i style="background:' + x[0] + '"></i>' + x[1] + '</span>').join('')
+      : mx.layer === 'current'
       ? [[0.2, '< 0,3'], [0.4, '0,3-0,6'], [0.8, '0,6-1'], [1.2, '> 1']].map((x) => '<span><i style="background:' + curCol(x[0]) + '"></i>' + x[1] + '</span>').join('') + '<span>kn</span>'
       : mx.layer === 'wind' ? [[5, '< 8'], [10, '8-14'], [16, '14-20'], [22, '20-27'], [30, '> 27']].map((x) => '<span><i style="background:' + windCol(x[0]) + '"></i>' + x[1] + '</span>').join('') + '<span>kn</span>' : '';
     const p = plan.show && plan.res;
@@ -302,6 +367,9 @@
     const lines = [L('Vento ', 'Wind ') + windKn(s).toFixed(0) + ' kn ' + L('da ', 'from ') + card8(windFrom(s)) + ' (' + pad3(windFrom(s)) + '&deg;)' + (s.g != null ? ' &middot; ' + L('raffiche ', 'gusts ') + s.g.toFixed(0) + ' kn' : '')];
     if (s.cu != null) lines.push(L('Corrente ', 'Current ') + curKn(s).toFixed(1) + ' kn ' + L('verso ', 'towards ') + card8(curTo(s)) + ' (' + pad3(curTo(s)) + '&deg;)');
     if (s.wh != null) lines.push(L('Onda ', 'Waves ') + s.wh.toFixed(1) + ' m');
+    const sl = stormLvl(s);
+    if (sl || (s.pr || 0) >= 0.1 || s.cape != null) lines.push((sl ? '<b style="color:' + (sl > 1 ? '#ff6b6b' : '#ffd54f') + '">' + stormTxt(sl) + '</b> &middot; ' : '') +
+      L('pioggia ', 'rain ') + (s.pr || 0).toFixed(1) + ' mm/h' + (s.cape != null ? ' &middot; CAPE ' + Math.round(s.cape) + ' J/kg' : ''));
     $('sheet')._html = null;
     $('sheet').innerHTML = '<h3>' + esc(fmtWhen(mx.time)) + '</h3>' + lines.map((x) => '<div class="sub">' + x + '</div>').join('') +
       '<div class="sub">' + q.lat.toFixed(4) + ', ' + q.lon.toFixed(4) + '</div><div class="row"><button class="btn sec" onclick="closeSheet()">' + esc(t('close')) + '</button></div>';
@@ -351,7 +419,7 @@
     const legs = pts.slice(0, -1).map((a, k) => {
       const b = pts[k + 1], d = distBrg(a.lat, a.lon, b.lat, b.lon);
       return { from: a.name, to: b.name, nm: d.nm, brg: d.brg, start: null, end: null, maxWs: 0, maxG: 0, minTwa: 180, along: 0, hours: 0,
-        maxWh: 0, mid: null, beyond: false, warn: [], info: [], sailed: 0, tacks: 0, gybes: 0, motor: 0, stuck: false };
+        maxWh: 0, storm: 0, stormT: null, mid: null, beyond: false, warn: [], info: [], sailed: 0, tacks: 0, gybes: 0, motor: 0, stuck: false };
     });
     let t = dep;
     const track = [{ t, lat: pts[0].lat, lon: pts[0].lon }];
@@ -371,6 +439,8 @@
           if (s.g != null) leg.maxG = Math.max(leg.maxG, s.g);
           if (ws >= 8) leg.minTwa = Math.min(leg.minTwa, angDiff(from, db.brg));
           if (s.wh != null) leg.maxWh = Math.max(leg.maxWh, s.wh);
+          const sl = stormLvl(s);
+          if (sl > leg.storm) { leg.storm = sl; leg.stormT = t; }
           if (s.cu != null) { cu = s.cu; cv = s.cv; }
           if (1 - db.nm / leg.nm <= 0.5 || !leg.mid) leg.mid = { ws, from, g: s.g, twa: angDiff(from, db.brg) };
         } else leg.beyond = true;
@@ -435,6 +505,8 @@
       }
       if (o.sail && g.motor >= 0.5) g.warn.push([1, L('Vento debole per ', 'Light wind for ') + fmtDur(g.motor * H) + L(': a motore', ': motoring')]);
       if (g.along <= -0.8) g.warn.push([1, L('Corrente contraria ', 'Foul current ') + (-g.along).toFixed(1) + ' kn']);
+      if (g.storm >= 2) g.warn.push([2, (g.storm === 3 ? L('Temporali forti previsti', 'Strong thunderstorms forecast') : L('Rischio temporali', 'Thunderstorm risk')) + L(' verso le ', ' around ') + fmtHM(g.stormT)]);
+      else if (g.storm === 1) g.warn.push([1, L('Aria instabile: possibili rovesci verso le ', 'Unstable air: showers possible around ') + fmtHM(g.stormT)]);
       if (g.maxWh >= 2) g.warn.push([2, L('Mare formato: onda ', 'Rough sea: waves ') + g.maxWh.toFixed(1) + ' m']);
       else if (g.maxWh >= 1.25) g.warn.push([1, L('Mare mosso: onda ', 'Moderate sea: waves ') + g.maxWh.toFixed(1) + ' m']);
       if (g.beyond) g.warn.push([1, L('Oltre la previsione: dati incompleti', 'Beyond the forecast: data missing')]);
@@ -696,7 +768,7 @@
     const sv = $('plStw') ? parseFloat($('plStw').value.replace(',', '.')) : plan.stw;
     if (sv > 0 && sv < 40) plan.stw = sv;
     savePlan();
-    const have = planData && planData.key === key;
+    const have = planData && planData.key === key && !!planData.cells[0].wc; // older saves have no thunderstorm data
     const run = () => {
       plan.name = r.name;
       const o = { stw: plan.stw, sail: plan.sail, beat: plan.beat, corr: plan.corr, polar: plan.sail && plan.useP ? getPolar() : null, eff: plan.eff / 100 };

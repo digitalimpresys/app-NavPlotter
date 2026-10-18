@@ -13,8 +13,10 @@ impacchettata con Capacitor, che si collega al nodo via WiFi e funziona senza in
   - aggiunge in Setup una scheda "App" con l'indirizzo del nodo e i comandi della guardia;
   - avvia il servizio di guardia nativo.
 - `www/navplotter-meteo.js` viene caricato dopo la web app (solo nell'app, il nodo non lo ha) e aggiunge:
-  - sulla carta il pulsante ≋: vento (barbe in nodi) o corrente (frecce) con una barra per scorrere le ore;
-    un tocco sul mare mostra vento, raffiche, corrente e onda in quel punto;
+  - sulla carta il pulsante ≋: vento (barbe in nodi), corrente (frecce) o temporali (pioggia, aria instabile,
+    temporale e temporale forte da codice meteo, CAPE e precipitazione, con un fulmine dove è previsto un
+    temporale), con una barra per scorrere le ore; un tocco sul mare mostra i valori in quel punto;
+    la pianificazione avvisa se una tratta incontra temporali o aria instabile e a che ora;
   - nella pagina Waypoint la scheda "Pianifica": per una rotta, partenza e velocità media, calcola orari,
     vento, corrente e onda per ogni tratta, con avvisi e il confronto tra altri orari di partenza;
     con "A vela" simula i bordi: virate di bolina (angolo al vento e distanza massima dalla rotta
