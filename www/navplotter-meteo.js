@@ -876,7 +876,10 @@
 
   // Texts follow the page language
   const pageLang = window.applyLang;
-  window.applyLang = function () { pageLang.apply(this, arguments); segBtn.textContent = L('Pianifica', 'Plan'); renderBar(); if (pane.style.display !== 'none') renderPlan(); };
-  segBtn.textContent = L('Pianifica', 'Plan');
+  // In the app the Waypoints page also plans the passage: the bottom bar calls it Navigation. The node's own web
+  // page, which has no planning, keeps calling it Waypoints.
+  const navLabel = () => { const sp = document.querySelector('#nav button[data-p="pWp"] span'); if (sp) sp.textContent = L('Navigazione', 'Navigation'); };
+  window.applyLang = function () { pageLang.apply(this, arguments); segBtn.textContent = L('Pianifica', 'Plan'); navLabel(); renderBar(); if (pane.style.display !== 'none') renderPlan(); };
+  segBtn.textContent = L('Pianifica', 'Plan'); navLabel();
   renderBar();
 })();
