@@ -232,7 +232,7 @@
     '#mxNote button{border:1px solid var(--line);background:none;color:var(--text);border-radius:8px;padding:4px 9px;font-size:13px}' +
     '#mxPlan{margin-top:4px;color:#ffb74d;display:none}#mxPlan.on{display:flex;gap:8px;align-items:center}#mxPlan span{flex:1}' +
     '#mxPlan button{border:1px solid var(--line);background:none;color:var(--text);border-radius:8px;padding:2px 8px}' +
-    '#planPane input{width:100%;padding:11px;border-radius:9px;border:1px solid var(--line);background:#0b1d33;color:var(--text);font-size:16px;color-scheme:dark}' +
+    '#planPane input[type=text],#planPane input[type=datetime-local]{width:100%;padding:11px;border-radius:9px;border:1px solid var(--line);background:#0b1d33;color:var(--text);font-size:16px;color-scheme:dark}' +
     '.plWarn{margin-top:6px;font-size:14px}.plWarn.w1{color:#ffb74d}.plWarn.w2{color:#ff6b6b;font-weight:700}' +
     '.card.w1{border-color:#ef6c00}.card.w2{border-color:var(--red);box-shadow:0 0 0 1px var(--red) inset}' +
     '.plAlt{display:flex;gap:8px;align-items:center;width:100%;text-align:left;margin-top:6px;padding:9px 10px;border-radius:9px;border:1px solid var(--line);background:none;color:var(--text);font-size:14px}' +
@@ -312,7 +312,7 @@
   // A route is cut into pieces of a few miles; the forecast is asked for each piece; then the boat is moved along
   // the route at its speed through the water plus the current along the course, hour after hour, reading the
   // wind where and when it is.
-  const plan = Object.assign({ route: null, dep: null, stw: 5, sail: false, beat: 45, corr: 1, show: false }, load('np-plan') || {});
+  const plan = Object.assign({ route: null, dep: null, stw: 5, sail: false, beat: 45, corr: 1, useP: true, eff: 90, lwl: 8.5, kind: 'cruiser', show: false }, load('np-plan') || {});
   plan.show = false; plan.res = null; plan.name = '';
   let planData = load('np-plan-data'); // {key, samples, t0, nt, cells, at}
 
@@ -375,10 +375,13 @@
           if (1 - db.nm / leg.nm <= 0.5 || !leg.mid) leg.mid = { ws, from, g: s.g, twa: angDiff(from, db.brg) };
         } else leg.beyond = true;
         // Close to the waypoint the boat just goes there
-        if (db.nm < 0.3) { /* direct */ } else if (o.sail && s && ws < 5) leg.motor += DT;
+        if (db.nm < 0.3) { if (o.polar && s) sp = Math.max(2, polarSpeed(o.polar, angDiff(from, db.brg), ws) * o.eff); }
+        else if (o.sail && s && ws < 5) leg.motor += DT;
         else if (o.sail && s) {
+          // With a polar the best angles for this wind come from it; otherwise the beating angle given
+          const ang = o.polar ? bestAngles(o.polar, ws) : { up: o.beat, down: 160 };
           let cone = null;
-          for (const c of [{ c: from, half: o.beat, up: true }, { c: from + 180, half: 20, up: false }]) {
+          for (const c of [{ c: from, half: ang.up, up: true }, { c: from + 180, half: 180 - ang.down, up: false }]) {
             const rel = sgn180(db.brg - c.c);
             if (Math.abs(rel) < c.half) { cone = c; if (!side) side = rel >= 0 ? 1 : -1; break; }
           }
@@ -387,9 +390,10 @@
             // Cross-track distance from the direct line, positive to its right
             const fromA = distBrg(A.lat, A.lon, P.lat, P.lon), xte = fromA.nm * Math.sin((fromA.brg - leg.brg) * D2R);
             if (o.corr > 0 && xte * Math.sign(Math.sin((head - leg.brg) * D2R)) >= o.corr) { side = -side; head = cone.c + side * cone.half; }
-            turn = cone.up ? 'tack' : 'gybe';
           } else side = 0;
-          sp = stw * polar(angDiff(from, head));
+          sp = o.polar ? polarSpeed(o.polar, angDiff(from, head), ws) * o.eff : stw * polar(angDiff(from, head));
+          // Too slow under sail: the engine, straight for the waypoint
+          if (o.polar && sp < 2) { leg.motor += DT; head = db.brg; sp = stw; side = 0; }
         }
         head = (head + 360) % 360;
         // A turn of more than 50 degrees on a tack or a gybe is counted, and marked on the track
@@ -477,6 +481,99 @@
     c.restore();
   }
 
+  // ================= the boat's polar =================
+  // A table of boat speed (knots) for true wind angle (rows) and true wind speed (columns), the usual .pol/.csv
+  // grid: first row "TWA\TWS" then the wind speeds, then one row per angle. It can be generated from the
+  // waterline length, imported from a file or typed in.
+  const RATIO = { tws: [6, 8, 10, 12, 14, 16, 20, 25], twa: [40, 52, 60, 75, 90, 110, 120, 135, 150, 165, 180], r: [
+    [.45, .55, .63, .68, .71, .72, .72, .70], [.55, .66, .75, .80, .83, .84, .84, .82], [.58, .70, .79, .85, .88, .89, .90, .89],
+    [.62, .73, .83, .89, .93, .95, .97, .97], [.63, .75, .85, .91, .95, .98, 1.00, 1.01], [.62, .75, .85, .92, .97, 1.00, 1.04, 1.07],
+    [.60, .73, .84, .91, .96, 1.00, 1.05, 1.09], [.54, .67, .79, .88, .94, .98, 1.04, 1.10], [.46, .59, .71, .81, .89, .95, 1.01, 1.07],
+    [.40, .52, .63, .74, .83, .90, .97, 1.03], [.37, .49, .60, .71, .80, .87, .95, 1.01]] };
+  const KINDS = { light: 1.08, cruiser: 1, heavy: 0.9 };
+  // Typical cruising polar scaled on the hull speed (2.43 x the square root of the waterline in metres)
+  function genPolar(lwl, kind) {
+    const vh = 2.43 * Math.sqrt(lwl) * (KINDS[kind] || 1);
+    return { tws: RATIO.tws.slice(), twa: RATIO.twa.slice(), v: RATIO.r.map((row) => row.map((x) => Math.round(x * vh * 10) / 10)) };
+  }
+  function parsePolar(text) {
+    const rows = String(text || '').split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !/^[#!]/.test(l)).map((l) => {
+      const sep = /[;\t]/.test(l) ? /[;\t]/ : /[\s,]+/;
+      return l.split(sep).map((x) => x.trim()).filter((x) => x !== '');
+    });
+    const num = (x) => parseFloat(String(x).replace(',', '.'));
+    if (rows.length < 3) throw new Error(L('servono almeno due righe di angoli', 'at least two angle rows are needed'));
+    const head = rows[0], tws = head.slice(1).map(num);
+    if (tws.length < 2 || tws.some(isNaN)) throw new Error(L('la prima riga deve avere le velocità del vento', 'the first row must hold the wind speeds'));
+    const twa = [], v = [];
+    for (const r of rows.slice(1)) {
+      const a = num(r[0]), sp = r.slice(1, tws.length + 1).map(num);
+      if (isNaN(a)) continue;
+      if (sp.length !== tws.length || sp.some(isNaN)) throw new Error(L('riga ', 'row ') + r[0] + L(': numero di valori sbagliato', ': wrong number of values'));
+      if (a <= 0 || sp.every((x) => x === 0)) continue; // the 0 degree row of some files
+      twa.push(a); v.push(sp);
+    }
+    if (twa.length < 2) throw new Error(L('servono almeno due righe di angoli', 'at least two angle rows are needed'));
+    for (let i = 1; i < twa.length; i++) if (twa[i] <= twa[i - 1]) throw new Error(L('gli angoli devono crescere', 'angles must go up'));
+    for (let i = 1; i < tws.length; i++) if (tws[i] <= tws[i - 1]) throw new Error(L('le velocità del vento devono crescere', 'wind speeds must go up'));
+    return { tws, twa, v };
+  }
+  const formatPolar = (p) => 'TWA\\TWS;' + p.tws.join(';') + '\n' + p.twa.map((a, i) => a + ';' + p.v[i].map((x) => x.toFixed(1)).join(';')).join('\n');
+  function seek(arr, x) { // index and fraction of x in an ascending array, clamped
+    if (x <= arr[0]) return [0, 0];
+    for (let i = 1; i < arr.length; i++) if (x <= arr[i]) return [i - 1, (x - arr[i - 1]) / (arr[i] - arr[i - 1])];
+    return [arr.length - 2, 1];
+  }
+  function polarSpeed(p, twa, tws) {
+    if (twa < p.twa[0] - 15 || tws <= 0) return 0;
+    const lowA = twa < p.twa[0] ? (twa - (p.twa[0] - 15)) / 15 : 1; // fading into the no-go zone
+    const lowW = tws < p.tws[0] ? tws / p.tws[0] : 1;               // under the lightest wind of the table
+    const [i, fa] = seek(p.twa, twa), [j, fw] = seek(p.tws, tws);
+    const at = (a, b) => p.v[a][b];
+    const v = (at(i, j) * (1 - fw) + at(i, j + 1) * fw) * (1 - fa) + (at(i + 1, j) * (1 - fw) + at(i + 1, j + 1) * fw) * fa;
+    return v * lowA * lowW;
+  }
+  // Best angles for speed made good, up and down wind, for a wind speed (kept per whole knot)
+  const angleMemo = new Map();
+  function bestAngles(p, tws) {
+    const key = p.key + ':' + Math.round(tws);
+    if (angleMemo.has(key)) return angleMemo.get(key);
+    let up = 45, bu = -1, down = 160, bd = -1;
+    for (let a = 25; a <= 90; a++) { const m = polarSpeed(p, a, tws) * Math.cos(a * D2R); if (m > bu) { bu = m; up = a; } }
+    for (let a = 100; a <= 180; a++) { const m = -polarSpeed(p, a, tws) * Math.cos(a * D2R); if (m > bd) { bd = m; down = a; } }
+    const r = { up, down, vmgUp: bu, vmgDown: bd };
+    angleMemo.set(key, r);
+    return r;
+  }
+  function getPolar() {
+    let txt = load('np-polar');
+    if (!txt) { txt = formatPolar(genPolar(plan.lwl, plan.kind)); save('np-polar', txt); }
+    try { const p = parsePolar(txt); p.key = txt.length + ':' + txt.slice(-40); return p; } catch (e) { return null; }
+  }
+  // Polar diagram: one curve per wind speed, angles from the bow (up) round to the stern (down)
+  function drawPolar(cv, p) {
+    const c = cv.getContext('2d'), dpr = window.devicePixelRatio || 1, w = cv.clientWidth, h = cv.clientHeight;
+    cv.width = w * dpr; cv.height = h * dpr; c.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const ox = 18, oy = h / 2, R = Math.min(w - 30, h / 2 - 14);
+    let vmax = 0; p.v.forEach((r) => r.forEach((x) => { vmax = Math.max(vmax, x); }));
+    vmax = Math.ceil(vmax);
+    c.clearRect(0, 0, w, h); c.font = '11px sans-serif'; c.fillStyle = '#9db0c9'; c.strokeStyle = '#27456f'; c.lineWidth = 1;
+    for (let k = 2; k <= vmax; k += 2) { c.beginPath(); c.arc(ox, oy, R * k / vmax, -Math.PI / 2, Math.PI / 2); c.stroke(); c.fillText(k + '', ox + 2, oy - R * k / vmax - 2); }
+    for (let a = 0; a <= 180; a += 30) { const r = a * D2R; c.beginPath(); c.moveTo(ox, oy); c.lineTo(ox + R * Math.sin(r), oy - R * Math.cos(r)); c.stroke(); if (a && a < 180) c.fillText(a + '°', ox + (R + 4) * Math.sin(r) - 8, oy - (R + 4) * Math.cos(r) + 4); }
+    const cols = ['#4dd0e1', '#29b6f6', '#66bb6a', '#d4e157', '#ffca28', '#ffa726', '#ef5350', '#ab47bc', '#ec407a', '#8d6e63'];
+    p.tws.forEach((tw, j) => {
+      c.strokeStyle = cols[j % cols.length]; c.lineWidth = 2; c.beginPath();
+      for (let a = p.twa[0]; a <= Math.min(180, p.twa[p.twa.length - 1]); a += 2) {
+        const v = polarSpeed(p, a, tw), x = ox + R * v / vmax * Math.sin(a * D2R), y = oy - R * v / vmax * Math.cos(a * D2R);
+        a === p.twa[0] ? c.moveTo(x, y) : c.lineTo(x, y);
+      }
+      c.stroke();
+      const b = bestAngles(p, tw);
+      [b.up, b.down].forEach((a) => { const v = polarSpeed(p, a, tw); c.fillStyle = cols[j % cols.length]; c.beginPath(); c.arc(ox + R * v / vmax * Math.sin(a * D2R), oy - R * v / vmax * Math.cos(a * D2R), 3, 0, 7); c.fill(); });
+      c.fillStyle = cols[j % cols.length]; c.fillText(tw + ' kn', w - 44, 14 + j * 14);
+    });
+  }
+
   // ---------- planning pane, a fourth tab next to Waypoints, Routes and Track ----------
   const seg = $('segWp').parentNode, segBtn = document.createElement('button');
   segBtn.id = 'segPlan'; seg.appendChild(segBtn);
@@ -494,6 +591,57 @@
   const localInput = (t) => { const d = new Date(t * 1000 - new Date(t * 1000).getTimezoneOffset() * 60000); return d.toISOString().slice(0, 16); };
   let planMsg = '', planBusy = false;
 
+  let polEdit = false, polMsg = '';
+  function polarSummary() {
+    const p = getPolar();
+    if (!p) return '<div class="plWarn w2">' + L('Polare non valida: aprila e correggila', 'Polar not valid: open and fix it') + '</div>';
+    const a = bestAngles(p, 12), b = bestAngles(p, 6);
+    return '<div class="hint">' + L('Con 12 nodi: bolina ', 'At 12 knots: upwind ') + a.up + '° ' + L('a ', 'at ') + polarSpeed(p, a.up, 12).toFixed(1) + ' kn, ' +
+      L('traverso ', 'beam reach ') + polarSpeed(p, 90, 12).toFixed(1) + ' kn, ' + L('poppa ', 'downwind ') + a.down + '°. ' +
+      L('Con 6 nodi: bolina ', 'At 6 knots: upwind ') + b.up + '°, ' + L('traverso ', 'beam reach ') + polarSpeed(p, 90, 6).toFixed(1) + ' kn.</div>';
+  }
+  function polarEditorHtml() {
+    const p = getPolar();
+    return '<div class="card" id="polCard"><div class="title">' + L('Polare della barca', "The boat's polar") + '</div>' +
+      (p ? '<canvas id="polCv" style="width:100%;height:300px;margin-top:8px"></canvas>' : '') +
+      '<label>' + L('Generala dalla lunghezza al galleggiamento (metri)', 'Make it from the waterline length (metres)') + '</label><input type="text" inputmode="decimal" id="polLwl" value="' + String(plan.lwl).replace('.', isIt() ? ',' : '.') + '">' +
+      '<label>' + L('Tipo di barca', 'Kind of boat') + '</label><select id="polKind">' +
+      [['light', L('Crociera veloce, leggera', 'Fast, light cruiser')], ['cruiser', L('Crociera', 'Cruiser')], ['heavy', L('Crociera pesante, vecchia', 'Heavy or older cruiser')]]
+        .map((k) => '<option value="' + k[0] + '"' + (plan.kind === k[0] ? ' selected' : '') + '>' + k[1] + '</option>').join('') + '</select>' +
+      '<div class="btns"><button class="btn sec" id="polGen">' + L('Genera', 'Make') + '</button>' +
+      '<label class="btn sec" style="margin:0">' + L('Importa file (.pol, .csv, .txt)', 'Import file (.pol, .csv, .txt)') + '<input type="file" id="polFile" accept=".pol,.csv,.txt,text/plain" style="display:none"></label></div>' +
+      '<label>' + L('Tabella: velocità della barca in nodi, una riga per angolo al vento, una colonna per velocità del vento', 'Table: boat speed in knots, a row per wind angle, a column per wind speed') + '</label>' +
+      '<textarea id="polTxt" spellcheck="false" style="width:100%;height:220px;font:13px/1.3 monospace;padding:8px;border-radius:9px;border:1px solid var(--line);background:#0b1d33;color:var(--text)">' + esc(load('np-polar') || '') + '</textarea>' +
+      '<div class="btns"><button class="btn" id="polSave">' + L('Salva la tabella', 'Save the table') + '</button><button class="btn sec" id="polClose">' + L('Chiudi', 'Close') + '</button></div>' +
+      '<div class="hint">' + (polMsg || L('La polare generata è una stima per una barca da crociera: se hai la polare del cantiere o ORC della tua barca importala, è più precisa. Formato: prima riga TWA\\TWS e le velocità del vento, poi gli angoli; separatori ; tab o spazi.',
+        'The generated polar is an estimate for a cruising boat: if you have the builder or ORC polar of your boat import it, it is more accurate. Format: first row TWA\\TWS and the wind speeds, then the angles; separators ; tab or spaces.')) + '</div></div>';
+  }
+  function bindPolarEditor() {
+    const p = getPolar();
+    if (p && $('polCv')) drawPolar($('polCv'), p);
+    const after = (msg) => { polMsg = msg; angleMemo.clear(); savePlan(); renderPlan(); if (plan.res) compute(false); };
+    $('polGen').onclick = () => {
+      const v = parseFloat($('polLwl').value.replace(',', '.'));
+      if (!(v >= 3 && v <= 40)) { alert(L('Lunghezza tra 3 e 40 metri', 'Length between 3 and 40 metres')); return; }
+      plan.lwl = v; plan.kind = $('polKind').value;
+      save('np-polar', formatPolar(genPolar(plan.lwl, plan.kind)));
+      after(L('Polare generata per ', 'Polar made for ') + fmtNm(v) + ' m.');
+    };
+    $('polSave').onclick = () => {
+      try { const q = parsePolar($('polTxt').value); save('np-polar', formatPolar(q)); after(L('Tabella salvata.', 'Table saved.')); }
+      catch (e) { polMsg = L('Non salvata: ', 'Not saved: ') + e.message; $('polCard').querySelector('.hint').textContent = polMsg; }
+    };
+    $('polClose').onclick = () => { polEdit = false; polMsg = ''; renderPlan(); };
+    $('polFile').onchange = (e) => {
+      const f = e.target.files && e.target.files[0];
+      if (!f) return;
+      f.text().then((txt) => {
+        try { const q = parsePolar(txt); save('np-polar', formatPolar(q)); after(L('Importata: ', 'Imported: ') + f.name); }
+        catch (err) { polMsg = L('File non riconosciuto: ', 'File not recognised: ') + err.message; renderPlan(); }
+      });
+    };
+  }
+
   function renderPlan() {
     const routes = ud.routes.filter((r) => routeWps(r).length >= 2);
     if (!routes.find((r) => r.id === plan.route)) plan.route = routes.length ? routes[0].id : null;
@@ -506,28 +654,38 @@
     }
     h += '<label>' + L('Rotta', 'Route') + '</label><select id="plRoute">' + routes.map((r) => '<option value="' + r.id + '"' + (r.id === plan.route ? ' selected' : '') + '>' + esc(r.name) + ' (' + fmtNm(pathNm(routeWps(r))) + ' NM)</option>').join('') + '</select>' +
       '<label>' + L('Partenza', 'Departure') + '</label><input type="datetime-local" id="plDep" value="' + localInput(plan.dep) + '">' +
-      '<label>' + L('Velocità media sull\'acqua (nodi)', 'Average speed through the water (knots)') + '</label><input type="text" inputmode="decimal" id="plStw" value="' + String(plan.stw).replace('.', isIt() ? ',' : '.') + '">' +
+      '<label>' + (plan.sail && plan.useP ? L('Velocità a motore (nodi)', 'Speed under engine (knots)') : L('Velocità media sull\'acqua (nodi)', 'Average speed through the water (knots)')) + '</label><input type="text" inputmode="decimal" id="plStw" value="' + String(plan.stw).replace('.', isIt() ? ',' : '.') + '">' +
       '<div class="check"><input type="checkbox" id="plSail"' + (plan.sail ? ' checked' : '') + '><span>' + L('A vela: simula i bordi', 'Under sail: simulate tacking') + '</span></div>' +
       '<div id="plSailBox" style="display:' + (plan.sail ? '' : 'none') + '">' +
-      '<label>' + L('Angolo di bolina dal vento (gradi)', 'Beating angle to the wind (degrees)') + '</label><input type="text" inputmode="numeric" id="plBeat" value="' + plan.beat + '">' +
+      '<label>' + L('Velocità a vela', 'Speed under sail') + '</label><select id="plUseP"><option value="1"' + (plan.useP ? ' selected' : '') + '>' + L('Dalla polare della barca', "From the boat's polar") + '</option>' +
+      '<option value="0"' + (plan.useP ? '' : ' selected') + '>' + L('Velocità media fissa', 'Fixed average speed') + '</option></select>' +
+      (plan.useP ? polarSummary() +
+        '<label>' + L('Rendimento rispetto alla polare (%)', 'Efficiency against the polar (%)') + '</label><input type="text" inputmode="numeric" id="plEff" value="' + plan.eff + '">' +
+        '<div class="btns"><button class="btn sec" id="plPolEdit">' + L('Polare: vedi, modifica, importa', 'Polar: view, edit, import') + '</button></div>'
+      : '<label>' + L('Angolo di bolina dal vento (gradi)', 'Beating angle to the wind (degrees)') + '</label><input type="text" inputmode="numeric" id="plBeat" value="' + plan.beat + '">') +
       '<label>' + L('Allontanamento massimo dalla rotta diretta (miglia, 0 = nessun limite)', 'Furthest off the direct line (miles, 0 = no limit)') + '</label><input type="text" inputmode="decimal" id="plCorr" value="' + String(plan.corr).replace('.', isIt() ? ',' : '.') + '">' +
-      '<div class="hint">' + L("Col vento in prua la barca bordeggia: vira quando può arrivare al waypoint sull'altro bordo o quando si allontana troppo dalla rotta. Con vento in poppa piena stramba. La velocità media è quella al traverso: di bolina e in poppa conta un po' meno; sotto i 5 nodi di vento va a motore.",
-        'With the wind on the nose the boat tacks: when it can fetch the waypoint on the other tack, or when it gets too far off the route. Dead downwind it gybes. The average speed is the one on a reach: close-hauled and running it is a little less; under 5 knots of wind it motors.') + '</div></div>' +
+      '<div class="hint">' + L("Col vento in prua la barca bordeggia: vira quando può arrivare al waypoint sull'altro bordo o quando si allontana troppo dalla rotta. Con vento in poppa piena stramba. Con la polare gli angoli di bolina e di poppa migliori li calcola lei per ogni vento; con la velocità fissa quella è al traverso, di bolina e in poppa un po' meno. Con poco vento va a motore.",
+        'With the wind on the nose the boat tacks: when it can fetch the waypoint on the other tack, or when it gets too far off the route. Dead downwind it gybes. With the polar the best upwind and downwind angles come from it for each wind; with a fixed speed that is the reaching speed, a little less close-hauled and running. In light wind it motors.') + '</div></div>' +
       '<div class="btns"><button class="btn" id="plGo">' + L('Calcola', 'Compute') + '</button></div>' +
       '<div class="hint">' + (planBusy ? L('Scarico le previsioni...', 'Downloading the forecast...') : planMsg ||
         L('Vento, corrente e onde da Open-Meteo lungo la rotta. La corrente cambia la velocità sul fondo e quindi gli orari.', 'Wind, current and waves from Open-Meteo along the route. The current changes the speed over ground, and so the times.')) + '</div></div>';
+    if (plan.sail && plan.useP && polEdit) h += polarEditorHtml();
     h += '<div id="plOut"></div>';
     pane.innerHTML = h;
     $('plRoute').onchange = (e) => { plan.route = +e.target.value; plan.res = null; savePlan(); renderPlan(); };
     $('plDep').onchange = (e) => { const d = new Date(e.target.value); if (!isNaN(d)) { plan.dep = Math.round(d.getTime() / 1000); savePlan(); if (plan.res) compute(false); } };
     $('plStw').onchange = (e) => { const v = parseFloat(e.target.value.replace(',', '.')); if (v > 0 && v < 40) { plan.stw = v; savePlan(); if (plan.res) compute(false); } };
-    $('plSail').onchange = (e) => { plan.sail = e.target.checked; $('plSailBox').style.display = plan.sail ? '' : 'none'; savePlan(); if (plan.res) compute(false); };
-    $('plBeat').onchange = (e) => { const v = parseFloat(e.target.value.replace(',', '.')); if (v >= 25 && v <= 80) { plan.beat = v; savePlan(); if (plan.res) compute(false); } else e.target.value = plan.beat; };
+    $('plSail').onchange = (e) => { plan.sail = e.target.checked; savePlan(); renderPlan(); if (plan.res) compute(false); };
+    $('plUseP').onchange = (e) => { plan.useP = e.target.value === '1'; savePlan(); renderPlan(); if (plan.res) compute(false); };
+    if ($('plEff')) $('plEff').onchange = (e) => { const v = parseFloat(e.target.value.replace(',', '.')); if (v >= 40 && v <= 120) { plan.eff = v; savePlan(); if (plan.res) compute(false); } else e.target.value = plan.eff; };
+    if ($('plPolEdit')) $('plPolEdit').onclick = () => { polEdit = !polEdit; renderPlan(); if (polEdit) $('polCard').scrollIntoView({ behavior: 'smooth' }); };
+    if (polEdit) bindPolarEditor();
+    if ($('plBeat')) $('plBeat').onchange = (e) => { const v = parseFloat(e.target.value.replace(',', '.')); if (v >= 25 && v <= 80) { plan.beat = v; savePlan(); if (plan.res) compute(false); } else e.target.value = plan.beat; };
     $('plCorr').onchange = (e) => { const v = parseFloat(e.target.value.replace(',', '.')); if (v >= 0 && v <= 50) { plan.corr = v; savePlan(); if (plan.res) compute(false); } else e.target.value = plan.corr; };
     $('plGo').onclick = () => compute(true);
     renderResult();
   }
-  function savePlan() { save('np-plan', { route: plan.route, dep: plan.dep, stw: plan.stw, sail: plan.sail, beat: plan.beat, corr: plan.corr }); }
+  function savePlan() { save('np-plan', { route: plan.route, dep: plan.dep, stw: plan.stw, sail: plan.sail, beat: plan.beat, corr: plan.corr, useP: plan.useP, eff: plan.eff, lwl: plan.lwl, kind: plan.kind }); }
 
   function compute(download) {
     const r = ud.routes.find((x) => x.id === plan.route);
@@ -541,7 +699,7 @@
     const have = planData && planData.key === key;
     const run = () => {
       plan.name = r.name;
-      const o = { stw: plan.stw, sail: plan.sail, beat: plan.beat, corr: plan.corr };
+      const o = { stw: plan.stw, sail: plan.sail, beat: plan.beat, corr: plan.corr, polar: plan.sail && plan.useP ? getPolar() : null, eff: plan.eff / 100 };
       plan.res = simulate(planData, pts, plan.dep, o);
       plan.alts = [0, 3, 6, 12, 24, 48].map((x) => simulate(planData, pts, plan.dep + x * H, o)).map((x, i) => Object.assign(x, { off: [0, 3, 6, 12, 24, 48][i] }));
       renderResult(); renderBar(); drawMap();
@@ -576,7 +734,7 @@
       (plan.sail && (r.tacks || r.gybes) ? '<span>' + L('Percorse', 'Sailed') + '</span><span>' + fmtNm(r.sailed) + ' NM' +
         (r.tacks ? ', ' + r.tacks + ' ' + L(r.tacks === 1 ? 'virata' : 'virate', r.tacks === 1 ? 'tack' : 'tacks') : '') +
         (r.gybes ? ', ' + r.gybes + ' ' + L(r.gybes === 1 ? 'strambata' : 'strambate', r.gybes === 1 ? 'gybe' : 'gybes') : '') + '</span>' : '') +
-      '<span>' + L('Durata', 'Time') + '</span><span>' + fmtDur(r.end - r.dep) + '</span>' +
+      '<span>' + L('Durata', 'Time') + '</span><span>' + fmtDur(r.end - r.dep) + ' &middot; ' + L('media ', 'average ') + (r.sailed / ((r.end - r.dep) / H || 1)).toFixed(1) + ' kn</span>' +
       '<span>' + L('Vento massimo', 'Strongest wind') + '</span><span>' + r.maxWs.toFixed(0) + ' kn, ' + L('raffiche ', 'gusts ') + r.maxG.toFixed(0) + ' kn</span></div>' +
       '<div class="btns"><button class="btn" id="plMap">' + L('Mostra sulla carta', 'Show on the chart') + '</button>' +
       '<button class="btn sec" id="plFollow">' + (ud.route === plan.route ? L('Rotta già seguita', 'Route being followed') : L('Segui la rotta', 'Follow the route')) + '</button></div></div>';

@@ -19,6 +19,9 @@ impacchettata con Capacitor, che si collega al nodo via WiFi e funziona senza in
     vento, corrente e onda per ogni tratta, con avvisi e il confronto tra altri orari di partenza;
     con "A vela" simula i bordi: virate di bolina (angolo al vento e distanza massima dalla rotta
     impostabili, oppure solo sulle lay-line) e strambate in poppa piena, con miglia percorse e tempo in più;
+    la velocità a vela viene dalla polare della barca (generata dalla lunghezza al galleggiamento, importata da
+    un file .pol/.csv o scritta a mano, con il diagramma polare) e gli angoli di bolina e poppa migliori
+    per ogni vento si ricavano da lei; un rendimento in % adatta la polare alla barca carica;
     "Mostra sulla carta" disegna il piano con la barca nella posizione stimata all'ora scelta.
   - Previsioni da [Open-Meteo](https://open-meteo.com) (dati CC BY 4.0), scaricate quando c'è internet e
     tenute sul telefono per l'uso in mare. Sulla WiFi del nodo l'app esce su internet con i dati mobili
