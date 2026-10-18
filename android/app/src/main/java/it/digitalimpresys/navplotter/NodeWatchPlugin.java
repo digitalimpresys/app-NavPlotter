@@ -4,6 +4,9 @@ import android.Manifest;
 import android.annotation.SuppressLint;
 import android.content.Context;
 import android.content.Intent;
+import android.net.ConnectivityManager;
+import android.net.Network;
+import android.net.NetworkCapabilities;
 import android.net.Uri;
 import android.net.nsd.NsdManager;
 import android.net.nsd.NsdServiceInfo;
@@ -25,6 +28,7 @@ import com.getcapacitor.annotation.Permission;
 import com.getcapacitor.annotation.PermissionCallback;
 import java.io.File;
 import java.io.FileOutputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
@@ -122,6 +126,50 @@ public class NodeWatchPlugin extends Plugin {
                     .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
                 getActivity().startActivity(Intent.createChooser(send, getContext().getString(R.string.share_gpx)));
                 call.resolve();
+            } catch (Exception e) {
+                call.reject(e.toString());
+            }
+        });
+    }
+
+    /**
+     * GET from the internet (the weather forecast), also while the app is bound to the node's WiFi, which has none:
+     * the request goes out on a network that does have internet, the boat WiFi if it has it, otherwise mobile data.
+     */
+    @SuppressWarnings("deprecation")
+    @PluginMethod
+    public void internetGet(PluginCall call) {
+        String url = call.getString("url");
+        getBridge().execute(() -> {
+            try {
+                ConnectivityManager cm = (ConnectivityManager) getContext().getSystemService(Context.CONNECTIVITY_SERVICE);
+                Network net = null;
+                for (Network n : cm.getAllNetworks()) {
+                    NetworkCapabilities c = cm.getNetworkCapabilities(n);
+                    if (c == null || !c.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                        || !c.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)) continue;
+                    if (net == null || c.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) net = n;
+                }
+                if (net == null) {
+                    call.reject("no internet");
+                    return;
+                }
+                HttpURLConnection c = (HttpURLConnection) net.openConnection(new URL(url));
+                c.setConnectTimeout(10000);
+                c.setReadTimeout(30000);
+                int status = c.getResponseCode();
+                InputStream in = status >= 400 ? c.getErrorStream() : c.getInputStream();
+                ByteArrayOutputStream body = new ByteArrayOutputStream();
+                if (in != null) {
+                    try (InputStream is = in) {
+                        byte[] buf = new byte[16384];
+                        for (int k; (k = is.read(buf)) > 0; ) body.write(buf, 0, k);
+                    }
+                }
+                JSObject r = new JSObject();
+                r.put("status", status);
+                r.put("data", body.toString("UTF-8"));
+                call.resolve(r);
             } catch (Exception e) {
                 call.reject(e.toString());
             }

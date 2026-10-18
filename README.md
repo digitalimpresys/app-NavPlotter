@@ -12,6 +12,15 @@ impacchettata con Capacitor, che si collega al nodo via WiFi e funziona senza in
     attraverso l'HTTP nativo di Capacitor, così il nodo non deve cambiare nulla;
   - aggiunge in Setup una scheda "App" con l'indirizzo del nodo e i comandi della guardia;
   - avvia il servizio di guardia nativo.
+- `www/navplotter-meteo.js` viene caricato dopo la web app (solo nell'app, il nodo non lo ha) e aggiunge:
+  - sulla carta il pulsante ≋: vento (barbe in nodi) o corrente (frecce) con una barra per scorrere le ore;
+    un tocco sul mare mostra vento, raffiche, corrente e onda in quel punto;
+  - nella pagina Waypoint la scheda "Pianifica": per una rotta, partenza e velocità media, calcola orari,
+    vento, corrente e onda per ogni tratta, con avvisi e il confronto tra altri orari di partenza;
+    "Mostra sulla carta" disegna il piano con la barca nella posizione stimata all'ora scelta.
+  - Previsioni da [Open-Meteo](https://open-meteo.com) (dati CC BY 4.0), scaricate quando c'è internet e
+    tenute sul telefono per l'uso in mare. Sulla WiFi del nodo l'app esce su internet con i dati mobili
+    (metodo nativo `NodeWatch.internetGet`).
 - `NodeWatchService` (Android) è un servizio in primo piano che chiede `/api/state` ogni 2 secondi
   anche a schermo spento:
   - se un bersaglio è in allarme suona la suoneria di sveglia del telefono in loop (canale "allarme",

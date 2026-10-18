@@ -114,6 +114,7 @@ nav .badge{position:absolute;top:3px;left:55%;margin:0}
 .nogap .btns>*,.nogap .chips>*{margin:0 8px 8px 0}
 .nogap #mapBtns>*+*,.nogap #banners>*+*,.nogap #chatLog>*+*{margin-top:8px}
 </style>
+
 <script src="navplotter-bridge.js"></script>
 </head>
 <body>
@@ -1089,5 +1090,6 @@ Promise.all([
   loadUd()
 ]).then(() => { applyLang(); fillForm(); $('navChat').style.display = cfg.msg ? '' : 'none'; poll(); setInterval(poll, 1000); });
 </script>
+<script src="navplotter-meteo.js"></script>
 </body>
 </html>
