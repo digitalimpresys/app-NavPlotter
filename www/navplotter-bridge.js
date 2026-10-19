@@ -1,7 +1,7 @@
 // NavPlotter app bridge.
 // Loaded before the node's web app (see scripts/sync-web.mjs). The web app is written to be served by the node
 // itself, so it asks for /api/... and /tiles/... on its own origin. Inside the app the page comes from the phone,
-// so here those addresses are sent to the node (http://192.168.4.1 unless changed), through Capacitor's native
+// (and /camera/... on the Raspberry Pi node) so here those addresses are sent to the node (http://192.168.4.1 unless changed), through Capacitor's native
 // HTTP so the node needs no CORS headers. The bridge also starts the native watch service that sounds the
 // collision alarm and the message alert with the screen off.
 (function () {
@@ -11,7 +11,7 @@
   const DEFAULT_NODE = 'http://192.168.4.1';
   let base = DEFAULT_NODE;
   try { base = localStorage.getItem('np-node') || DEFAULT_NODE; } catch (e) {}
-  const nodePath = (u) => typeof u === 'string' && (u.startsWith('/api/') || u.startsWith('/tiles/'));
+  const nodePath = (u) => typeof u === 'string' && (u.startsWith('/api/') || u.startsWith('/tiles/') || u.startsWith('/camera/'));
 
   window.NavPlotterApp = {
     native,
@@ -154,7 +154,7 @@
     set(v) {
       if (!nodePath(v)) { this._npUrl = null; return srcDesc.set.call(this, v); }
       this._npUrl = target() + v; this._npTries = 0;
-      if (!this._npRetry) { this._npRetry = true; this.addEventListener('error', retryTile); }
+      if (!this._npRetry && v.startsWith('/tiles/')) { this._npRetry = true; this.addEventListener('error', retryTile); }
       srcDesc.set.call(this, this._npUrl);
     },
     configurable: true, enumerable: true
