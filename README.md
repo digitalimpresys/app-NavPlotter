@@ -24,6 +24,9 @@ impacchettata con Capacitor, che si collega al nodo via WiFi e funziona senza in
     la velocità a vela viene dalla polare della barca (generata dalla lunghezza al galleggiamento, importata da
     un file .pol/.csv o scritta a mano, con il diagramma polare) e gli angoli di bolina e poppa migliori
     per ogni vento si ricavano da lei; un rendimento in % adatta la polare alla barca carica;
+    i bordi possono venire dalle isocrone (la strada più veloce con vento e corrente previsti, tratta per
+    tratta, dentro la distanza massima dalla rotta; le isocrone di ogni ora si vedono sulla carta) o dalle
+    regole semplici sulle lay-line;
     "Mostra sulla carta" disegna il piano con la barca nella posizione stimata all'ora scelta.
   - Previsioni da [Open-Meteo](https://open-meteo.com) (dati CC BY 4.0), scaricate quando c'è internet e
     tenute sul telefono per l'uso in mare. Sulla WiFi del nodo l'app esce su internet con i dati mobili
