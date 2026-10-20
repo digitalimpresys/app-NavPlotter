@@ -28,6 +28,8 @@ impacchettata con Capacitor, che si collega al nodo via WiFi e funziona senza in
     tratta, dentro la distanza massima dalla rotta; le isocrone di ogni ora si vedono sulla carta) o dalle
     regole semplici sulle lay-line;
     "Mostra sulla carta" disegna il piano con la barca nella posizione stimata all'ora scelta.
+  - Waypoint spostabili sulla carta: tocco lungo sul waypoint e trascinarlo; nella scheda del waypoint c'è
+    "Annulla spostamento".
   - Previsioni da [Open-Meteo](https://open-meteo.com) (dati CC BY 4.0), scaricate quando c'è internet e
     tenute sul telefono per l'uso in mare. Sulla WiFi del nodo l'app esce su internet con i dati mobili
     (metodo nativo `NodeWatch.internetGet`).
