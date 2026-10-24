@@ -3,11 +3,13 @@
 // itself, so it asks for /api/... and /tiles/... on its own origin. Inside the app the page comes from the phone,
 // (and /camera/... on the Raspberry Pi node) so here those addresses are sent to the node (http://192.168.4.1 unless changed), through Capacitor's native
 // HTTP so the node needs no CORS headers. The bridge also starts the native watch service that sounds the
-// collision alarm and the message alert with the screen off.
+// collision alarm and the message alert with the screen off (Android only: on the iPhone and the iPad there is no
+// such service, and the page itself sounds the alarm while the app is open).
 (function () {
   'use strict';
   const cap = window.Capacitor;
   const native = !!(cap && cap.isNativePlatform && cap.isNativePlatform());
+  const ios = native && cap.getPlatform && cap.getPlatform() === 'ios';
   const DEFAULT_NODE = 'http://192.168.4.1';
   let base = DEFAULT_NODE;
   try { base = localStorage.getItem('np-node') || DEFAULT_NODE; } catch (e) {}
@@ -163,6 +165,7 @@
   // ---------- native watch service (alarm and messages with the screen off) ----------
   let watching = false;
   function startWatch() {
+    if (ios) return;
     plugin('NodeWatch', 'start', { url: base }).then(() => { watching = true; renderAppCard(); }, (e) => console.warn('NodeWatch', e));
   }
   // The silence button on the alarm banner also silences the phone's own alarm
@@ -187,7 +190,8 @@
     const a = ev.target && ev.target.closest && ev.target.closest('a[href^="/api/"]');
     if (!a) return;
     ev.preventDefault();
-    plugin('NodeWatch', 'shareFromNode', { url: target() + a.getAttribute('href') }).catch(() => {});
+    if (ios) window.open(target() + a.getAttribute('href'), '_blank');     // Safari downloads it
+    else plugin('NodeWatch', 'shareFromNode', { url: target() + a.getAttribute('href') }).catch(() => {});
   }, true);
 
   // ---------- "App" card at the end of Setup: paired node, address, watch ----------
@@ -220,12 +224,14 @@
       '<details style="margin-top:10px"><summary class="hint">' + T('Indirizzo a mano', 'Address by hand') + '</summary>' +
       '<input type="text" id="appNode" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" style="margin-top:8px">' +
       '<div class="btns"><button class="btn sec" id="appNodeSave">' + T('Usa questo indirizzo', 'Use this address') + '</button></div></details>' +
+      (ios ? '<div class="hint" style="margin-top:10px">' + T("Su iPhone e iPad l'allarme di abbordo e i messaggi suonano solo con l'app aperta e lo schermo acceso.",
+        'On the iPhone and the iPad the collision alarm and messages sound only while the app is open and the screen is on.') + '</div>' :
       '<div class="kv" style="margin-top:10px"><span>' + T('Guardia', 'Watch') + '</span><span>' + (watching ? T('attiva', 'on') : T('ferma', 'off')) + '</span>' +
       '<span>' + T('Batteria', 'Battery') + '</span><span>' + (batteryFree === null ? '?' : batteryFree ? T('non ottimizzata, va bene', 'not optimised, good') : T('ottimizzata: Android può fermare la guardia', 'optimised: Android may stop the watch')) + '</span></div>' +
       '<div class="btns">' + (batteryFree ? '' : '<button class="btn sec" id="appBattery">' + T('Non ottimizzare la batteria', 'Ignore battery optimisation') + '</button>') +
       '<button class="btn sec" id="appStop">' + (watching ? T('Ferma la guardia', 'Stop watching') : T('Avvia la guardia', 'Start watching')) + '</button></div>' +
       '<div class="hint">' + T("La guardia resta attiva a schermo spento e suona l'allarme di abbordo e i messaggi. Si ferma dalla notifica o da qui, a fine navigazione.",
-        'The watch keeps running with the screen off and sounds the collision alarm and messages. Stop it from the notification or here, when you are done sailing.') + '</div>';
+        'The watch keeps running with the screen off and sounds the collision alarm and messages. Stop it from the notification or here, when you are done sailing.') + '</div>');
     document.getElementById('appNode').value = base;
     document.getElementById('appFind').onclick = () => findPaired(true).then((ok) => { if (!ok) alert(T('Nodo abbinato non trovato. Il telefono è sulla sua WiFi o su quella di bordo?', 'Paired node not found. Is the phone on its WiFi or on the boat WiFi?')); });
     const fg = document.getElementById('appForget');
@@ -239,13 +245,15 @@
     document.getElementById('appNodeSave').onclick = () => { window.NavPlotterApp.setNode(document.getElementById('appNode').value); location.reload(); };
     const bt = document.getElementById('appBattery');
     if (bt) bt.onclick = () => plugin('NodeWatch', 'ignoreBatteryOptimizations', {}).catch(() => {});
-    document.getElementById('appStop').onclick = () => {
+    const st = document.getElementById('appStop');
+    if (st) st.onclick = () => {
       if (watching) { watching = false; plugin('NodeWatch', 'stop', {}).catch(() => {}); renderAppCard(); } else startWatch();
     };
   }
   // Battery state: read again when the user comes back from Android's dialog
   let batteryFree = null;
   function checkBattery() {
+    if (ios) return;
     plugin('NodeWatch', 'ignoreBatteryOptimizations', { ask: false }).then((r) => { batteryFree = !!(r && r.ignoring); renderAppCard(); }, () => {});
   }
   document.addEventListener('visibilitychange', () => { if (!document.hidden) checkBattery(); });

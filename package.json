@@ -5,7 +5,9 @@
   "scripts": {
     "sync-web": "node scripts/sync-web.mjs",
     "sync": "npx cap sync android",
-    "build:android": "npx cap sync android && cd android && ./gradlew assembleDebug"
+    "build:android": "npx cap sync android && cd android && ./gradlew assembleDebug",
+    "sync:ios": "npx cap sync ios",
+    "open:ios": "npx cap open ios"
   },
   "repository": {
     "type": "git",
@@ -19,7 +21,8 @@
   "homepage": "https://github.com/digitalimpresys/app-navplotter#readme",
   "dependencies": {
     "@capacitor/android": "^7.6.9",
-    "@capacitor/core": "^7.6.9"
+    "@capacitor/core": "^7.6.9",
+    "@capacitor/ios": "^7.6.9"
   },
   "devDependencies": {
     "@capacitor/cli": "^7.6.9"
