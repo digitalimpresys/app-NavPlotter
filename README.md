@@ -46,6 +46,34 @@ impacchettata con Capacitor, che si collega al nodo via WiFi e funziona senza in
 Ogni push costruisce un APK di debug con GitHub Actions e lo pubblica come pre-release
 `apk-<ramo>` nella pagina Releases del repository: si scarica direttamente dal telefono.
 
+## iPad e iPhone (Xcode)
+
+Il progetto iOS è in `ios/`. Serve un Mac con Xcode e Node 22 (`brew install node`, oppure da nodejs.org).
+
+```
+git clone https://github.com/digitalimpresys/app-NavPlotter.git
+cd app-NavPlotter
+git checkout android-poc
+npm ci
+npx cap sync ios
+open ios/App/App.xcodeproj
+```
+
+In Xcode:
+1. Collega l'iPad con il cavo e sceglilo in alto come destinazione.
+2. Nel target **App**, scheda **Signing & Capabilities**: in **Team** scegli il tuo Apple ID (Add Account... se
+   non c'è). Se Xcode dice che l'identificativo è già preso, cambia **Bundle Identifier** (per esempio
+   aggiungi `.gianni`).
+3. Premi ▶︎ (Run).
+4. La prima volta, sull'iPad: Impostazioni > Generali > VPN e gestione dispositivi > il tuo Apple ID > **Autorizza**.
+   Con un Apple ID gratuito l'app va reinstallata da Xcode ogni 7 giorni.
+5. Quando l'app chiede di accedere alla **rete locale**, rispondi Consenti: serve per parlare con il nodo.
+
+Dopo ogni aggiornamento del repository: `git pull`, `npx cap sync ios`, poi di nuovo ▶︎ in Xcode.
+
+Differenze da Android: non c'è la guardia a schermo spento. L'allarme di abbordo e i messaggi suonano solo con
+l'app aperta e lo schermo acceso: iOS non lascia girare un'app in sottofondo per controllare il nodo.
+
 ## Build in locale
 
 Servono Node 22, JDK 21 e Android SDK (API 35).
