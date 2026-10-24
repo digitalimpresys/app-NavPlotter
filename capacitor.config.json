@@ -1,0 +1,12 @@
+{
+  "appId": "it.digitalimpresys.navplotter",
+  "appName": "NavPlotter",
+  "webDir": "www",
+  "server": {
+    "androidScheme": "http",
+    "cleartext": true
+  },
+  "android": {
+    "allowMixedContent": true
+  }
+}

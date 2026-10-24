@@ -1,0 +1,26 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">NavPlotter</string>
+    <string name="title_activity_main">NavPlotter</string>
+    <string name="package_name">it.digitalimpresys.navplotter</string>
+    <string name="custom_url_scheme">it.digitalimpresys.navplotter</string>
+
+    <string name="ch_watch">Watch</string>
+    <string name="ch_alarm">Collision alarm</string>
+    <string name="ch_msg">Messages</string>
+    <string name="ch_link">Link to the node</string>
+    <string name="watch_title">NavPlotter on watch</string>
+    <string name="watch_ok">Connected to %1$s, %2$d boats nearby</string>
+    <string name="watch_wait">Looking for the node at %1$s</string>
+    <string name="alarm_title">Collision: %1$s</string>
+    <string name="alarm_text">Passes at %1$s NM in %2$s</string>
+    <string name="alarm_more">and %1$d more</string>
+    <string name="alarm_muted">Alarm silenced</string>
+    <string name="link_lost_title">Node not reachable</string>
+    <string name="link_lost_text">The collision alarm cannot work until the phone is back on the node\'s WiFi.</string>
+    <string name="msg_title">Message from %1$s</string>
+    <string name="msg_all">%1$s (to all)</string>
+    <string name="act_mute">Silence</string>
+    <string name="act_stop">Stop</string>
+    <string name="share_gpx">Save the track</string>
+</resources>

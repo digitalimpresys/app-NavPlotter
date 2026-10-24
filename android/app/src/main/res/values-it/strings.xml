@@ -1,0 +1,21 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="ch_watch">Guardia</string>
+    <string name="ch_alarm">Allarme di abbordo</string>
+    <string name="ch_msg">Messaggi</string>
+    <string name="ch_link">Collegamento al nodo</string>
+    <string name="watch_title">NavPlotter di guardia</string>
+    <string name="watch_ok">Collegato a %1$s, %2$d barche vicine</string>
+    <string name="watch_wait">Cerco il nodo su %1$s</string>
+    <string name="alarm_title">Abbordo: %1$s</string>
+    <string name="alarm_text">Passa a %1$s NM tra %2$s</string>
+    <string name="alarm_more">e altre %1$d</string>
+    <string name="alarm_muted">Allarme silenziato</string>
+    <string name="link_lost_title">Nodo non raggiungibile</string>
+    <string name="link_lost_text">L\'allarme di abbordo non può funzionare finché il telefono non torna sulla WiFi del nodo.</string>
+    <string name="msg_title">Messaggio da %1$s</string>
+    <string name="msg_all">%1$s (a tutti)</string>
+    <string name="act_mute">Silenzia</string>
+    <string name="act_stop">Ferma</string>
+    <string name="share_gpx">Salva il tracciato</string>
+</resources>

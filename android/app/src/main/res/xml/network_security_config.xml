@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The nodes only speak plain HTTP (http://192.168.4.1 on their own WiFi, or an address on the boat WiFi) -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>
